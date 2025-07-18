@@ -39,6 +39,14 @@ chmod +x setup.sh
    - Edit `.env` with your Discord token
    - Edit `src/config_settings.py` with user IDs
 
+5. **Set up Google Sheets (Optional)**
+   - Create a Google Cloud Platform project
+   - Enable Google Sheets API and Google Drive API
+   - Create a service account and download the JSON key
+   - Save the key as `src/config/google_service_account.json`
+   - Share your Google Sheets with the service account email
+   - Configure `GOOGLE_SHEETS_ENABLED=true` in your `.env` file
+
 ## Project Structure
 
 ```txt
@@ -52,10 +60,13 @@ FinanceAutomation/
 │   ├── finance_core/       # Core business logic
 │   │   ├── csv_helper.py   # CSV parsing utilities
 │   │   ├── export.py       # Export functionality
+│   │   ├── google_sheets.py # Google Sheets integration
 │   │   ├── session_management.py # Session persistence
 │   │   └── ui/             # Discord UI components
 │   │       └── transaction_prompt.py # Transaction categorization UI
 │   └── config/             # Configuration files
+│       ├── google_service_account.json # Google API credentials (not in git)
+│       └── spaarpot_uuid_map.py # Savings account mapping
 ├── requirements.txt        # Python dependencies
 ├── .env.example           # Environment template
 ├── .gitignore             # Git ignore rules
@@ -178,7 +189,29 @@ python -c "from config_settings import *; print('✅ Config OK')"
 
 # Test CSV processing
 python -c "from finance_core.csv_helper import load_transactions_from_csv"
+
+# Test Google Sheets integration (with credentials)
+python -c "from finance_core.google_sheets import GoogleSheetsExporter; print('✅ Google Sheets OK')"
 ```
+
+### Testing Google Sheets Integration
+
+To test Google Sheets functionality:
+
+1. Set up a test Google Sheet
+2. Create test data:
+
+   ```python
+   test_income = [{"date": "2024-01-01", "amount": 100.0, "category": "Salary"}]
+   test_expenses = [{"date": "2024-01-01", "amount": -50.0, "category": "Food"}]
+   ```
+
+3. Test the export:
+
+   ```python
+   from finance_core.google_sheets import export_to_google_sheets
+   export_to_google_sheets(test_income, test_expenses)
+   ```
 
 ### Manual Testing
 

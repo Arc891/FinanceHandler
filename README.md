@@ -1,4 +1,12 @@
-# Discord Finance Bot
+# Di## Features
+
+- 🤖 **Modern Discord Bot** with slash commands
+- 📊 **CSV Transaction Processing** from bank exports
+- 🏷️ **Interactive Categorization** with Discord UI
+- 💾 **Session Management** for resuming interrupted processes
+- ⏰ **Daily Reminders** for transaction processing
+- 🔄 **Auto-categorization** with customizable rules
+- 📈 **Google Sheets Export** for further analysisnance Bot
 
 A Discord bot for automated processing and categorization of financial transactions from CSV exports.
 
@@ -17,6 +25,7 @@ A Discord bot for automated processing and categorization of financial transacti
 - `/resume` - Resume a previously paused session
 - `/status` - Check your current processing progress
 - `/cancel` - Cancel and clear your current session
+- `/export` - Export categorized transactions to Google Sheets
 
 ## Setup
 
@@ -65,7 +74,20 @@ A Discord bot for automated processing and categorization of financial transacti
    - Copy the token to your `.env` file
    - Enable required intents: Message Content, Server Members
 
-6. **Run the bot**
+6. **Set up Google Sheets (Optional)**
+   
+   If you want to export transactions to Google Sheets:
+   
+   a. Go to [Google Cloud Console](https://console.cloud.google.com/)
+   b. Create a new project or select an existing one
+   c. Enable the Google Sheets API and Google Drive API
+   d. Go to "Credentials" → "Create Credentials" → "Service Account"
+   e. Download the JSON key file
+   f. Save it as `src/config/google_service_account.json`
+   g. Share your Google Sheet with the service account email
+   h. Update your `.env` file with Google Sheets configuration
+
+7. **Run the bot**
 
    ```bash
    cd src
@@ -85,6 +107,10 @@ REMINDER_CHANNEL_ID=your_channel_id_here
 
 # Daily reminder time (optional, default: 09:00)
 DAILY_REMINDER_TIME=09:00
+
+# Google Sheets Configuration (optional)
+GOOGLE_SHEETS_ENABLED=true
+GOOGLE_CREDENTIALS_PATH=config/google_service_account.json
 ```
 
 ### User Mentions
@@ -178,6 +204,7 @@ python bot.py
 - `/status` - Check your current processing session status
 - `/resume` - Resume a previously paused session
 - `/cancel` - Cancel and clear your current session
+- `/export` - Export categorized transactions to Google Sheets
 
 ### Daily Reminders
 
@@ -189,12 +216,16 @@ The bot will send daily reminders at 09:00 (configurable) to upload CSV files fo
 src/
 ├── bot.py                    # Main bot file
 ├── bot_commands.py           # Slash command definitions
-├── config.py                 # Configuration settings
+├── config_settings.py       # Configuration settings
 ├── constants.py              # Category enums and rules
-├── asnexport.py             # Legacy CSV processing
+├── asnexport.py             # Legacy CSV processing (deprecated)
+├── config/
+│   ├── google_service_account.json  # Google Sheets credentials
+│   └── spaarpot_uuid_map.py # Savings account mapping
 └── finance_core/
     ├── csv_helper.py         # CSV loading and normalization
     ├── export.py             # Main processing logic
+    ├── google_sheets.py      # Google Sheets integration
     ├── session_management.py # Session persistence
     └── ui/
         └── transaction_prompt.py # Interactive UI components
