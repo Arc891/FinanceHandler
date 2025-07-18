@@ -1,0 +1,140 @@
+from enum import Enum
+
+# ─────────────────────────────────────────────────────────────────────────────
+# - ENUMS FOR EXPENSE AND INCOME CATEGORIES
+#    Each category has a label and a regex pattern for matching.
+# ─────────────────────────────────────────────────────────────────────────────
+
+class ExpenseCategory(str, Enum):
+    """
+    Each member's `value` is the exact label (for Google Sheets, etc.),
+    and `pattern` is the minimal regex that should match for manual-categorization.
+    """
+
+    pattern: str
+
+    def __new__(cls, label: str, pattern: str):
+        # Create the str‐value itself:
+        obj = str.__new__(cls, label)
+        obj._value_ = label
+        # Attach a `pattern` attribute to each member:
+        obj.pattern = pattern
+        return obj
+
+    ABBONEMENTEN            = ("Abbonementen",            r"ab")
+    ANDER                   = ("Ander",                   r"an")
+    AUTO_VERVOER            = ("Auto / vervoer",          r"au")
+    BOODSCHAPPEN            = ("Boodschappen",            r"bo")
+    CADEAUTJES              = ("Cadeautjes",              r"ca")
+    DATES_UITJES            = ("Dates/uitjes",            r"da|ui")
+    GAS_WATER_ELECTRA       = ("Gas/water/electra",       r"ga")
+    GOEIE_DOELEN            = ("Goeie doelen",            r"go")
+    HUISHOUDEN              = ("Huishouden",              r"hu")
+    NAAR_SPAARPOTJES        = ("Naar spaarpotjes",        r"ns")
+    PERSOONLIJK_VRIJ_GELD   = ("Persoonlijk vrij geld",   r"pvg")
+    PERSOONLIJKE_VERZORGING = ("Persoonlijke verzorging", r"pvz")
+    REKENINGEN              = ("Rekeningen",              r"re")
+    OV                      = ("OV",                      r"ov")
+    UIT_SPAARPOTJE          = ("Uit spaarpotje",          r"us")
+    NOG_IN_TEDELEN          = ("! Nog in te delen !",     r"nog|!")
+    VERZEKERINGEN           = ("Verzekeringen",           r"ve")
+    ZORGVERZEKERING         = ("Zorgverzekering",         r"zo")
+
+    DEFAULT                 = NOG_IN_TEDELEN
+
+
+class IncomeCategory(str, Enum):
+    """
+    Each member's `value` is the exact income label,
+    and `pattern` is the minimal regex for matching.
+    """
+
+    pattern: str
+
+    def __new__(cls, label: str, pattern: str):
+        obj = str.__new__(cls, label)
+        obj._value_ = label
+        obj.pattern = pattern
+        return obj
+
+    SALARIS               = ("Salaris",               r"sa")
+    SPAARREKENING         = ("Spaarrekening",         r"sp")
+    BONUS                 = ("Bonus",                 r"bo")
+    OVERHEID              = ("Overheid",              r"ov")
+    GIFT                  = ("Gift",                  r"gi")
+    PERSONLIJKE_REKENING  = ("Persoonlijke rekening", r"pe")
+    GEMEENTE              = ("Gemeente",              r"ge")
+
+    DEFAULT               = PERSONLIJKE_REKENING
+
+# ─────────────────────────────────────────────────────────────────────────────
+# - AUTO‐CATEGORIZATION RULES (SEPARATE FOR EXPENSE & INCOME)
+#    Keys are regex patterns; values are (description_template, category).
+# ─────────────────────────────────────────────────────────────────────────────
+
+CATEGORIZATION_RULES_EXPENSE = {
+    r"gebruik betaalrekening":         ("ASN Gebruikskosten", ExpenseCategory.ABBONEMENTEN),
+    r"maandelijkse bijdrage familie":  ("{c} uitjes",   ExpenseCategory.ABBONEMENTEN),
+    r"Apple opslag en app pomodoro":   ("{c} Janneke",  ExpenseCategory.ABBONEMENTEN),
+    r"Simpel|Vodafone":                ("{c} telefoon", ExpenseCategory.ABBONEMENTEN),
+    r"consumentenbond|ANWB":           ("{c}", ExpenseCategory.ABBONEMENTEN),
+    r"lensplaza":                      ("Lenzen Janneke",  ExpenseCategory.ABBONEMENTEN),
+    r"ODIDO":                          ("{c} Internet/TV", ExpenseCategory.ABBONEMENTEN),
+    r"geldmaat": ("{c}", ExpenseCategory.ANDER),
+    r"Kuario": ("Printen Bieb Driebergen", ExpenseCategory.ANDER),
+    r"TinQ|Tango":   ("{c} tanken", ExpenseCategory.AUTO_VERVOER),
+    r"Greenwheels":  ("{c} auto",   ExpenseCategory.AUTO_VERVOER),
+    r"JUMBO|PICNIC|LIDL|AH|ALBERT HEIJN|VOMAR|PLUS|Fruitcompany": ("{c} inkopen", ExpenseCategory.BOODSCHAPPEN),
+    r"Huiskamer":  ("{c} snackje", ExpenseCategory.BOODSCHAPPEN),
+    r"snack company|snackbar traay": ("{c} eten", ExpenseCategory.DATES_UITJES),
+    r"vitens":  ("{c} water",   ExpenseCategory.GAS_WATER_ELECTRA),
+    r"ENGIE":   ("{c} energie", ExpenseCategory.GAS_WATER_ELECTRA),
+    r"sponsorbijdrage": ("Compassion Midina", ExpenseCategory.GOEIE_DOELEN),
+    r"(?i)(?=.*\b(?:donatie|gift|bijdrage)\b).*?\W ([A-Za-z0-9 &\-\.]+)$": ("Donatie/bijdrage aan {c}", ExpenseCategory.GOEIE_DOELEN),
+    r"Kantoor der Kerkelijke Goederen": ("Huur {c}", ExpenseCategory.HUISHOUDEN),
+    r"maandelijks spaargeld - (\w+)": ("Sparen - {c}", ExpenseCategory.NAAR_SPAARPOTJES),
+    r"ovpay|NS": ("{c} OV kosten", ExpenseCategory.OV),
+    r"vrij geld (\w+)": ("Vrij geld {c}", ExpenseCategory.PERSOONLIJK_VRIJ_GELD),
+    r"Bolhaar": ("{c} zorgkosten", ExpenseCategory.REKENINGEN),
+    r"(\w+) PROMOVENDUM": ("Promovendum {c}", ExpenseCategory.VERZEKERINGEN),
+    r"zorgkostennota":                      ("Zorgkosten terugbetaling", ExpenseCategory.ZORGVERZEKERING),
+    r"zilveren kruis|de christelijke zorg": ("{c} zorgverzekering",      ExpenseCategory.ZORGVERZEKERING),
+}
+
+CATEGORIZATION_RULES_INCOME = {
+    r"DUO":                  ("{c} uitkering", IncomeCategory.OVERHEID),
+    r"SALARIS":              ("{c} Ezra",      IncomeCategory.SALARIS),
+    r"BONUS":                ("{c} bonus",     IncomeCategory.BONUS),
+    r"GEMEENTE":             ("{c} uitkering", IncomeCategory.GEMEENTE),
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# - GOOGLE SHEET CONFIGURATION
+#    Adjust these constants to match your Google Sheet setup.
+# ─────────────────────────────────────────────────────────────────────────────
+
+GSHEET_NAME = "Test Automation Sheet" # The exact name of your Google Sheet
+GSHEET_TAB = "Blad1" # The worksheet/tab name inside that sheet
+
+# ─────────────────────────────────────────────────────────────────────────────
+# - API AND ASPSP CONFIGURATION
+#    Adjust these constants to match your API and ASPSP setup.
+# ─────────────────────────────────────────────────────────────────────────────
+
+API_ORIGIN = "https://api.enablebanking.com"
+ASPSP_NAME = "Mock ASPSP"
+ASPSP_COUNTRY = "NL"
+
+DDK_SESSION = {
+  "session_id": "4638f4f2-8c96-44ff-9b19-cf68a911a3ff",
+  "accounts": [
+    {"uid": "378e7021-64a4-495e-9a1d-8ca3119f73ea"}
+  ]
+}
+
+NL_SESSION = {
+  "session_id": "38764298-e4a0-4469-b5d2-64506da2cdc1",
+  "accounts": [
+    {"uid": "e12452f0-2f45-4319-a709-fb35a017eb01"}
+  ]
+}

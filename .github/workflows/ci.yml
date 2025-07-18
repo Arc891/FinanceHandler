@@ -1,0 +1,104 @@
+name: Discord Finance Bot CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: [3.8, 3.9, "3.10", "3.11"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Cache pip dependencies
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install flake8 pytest
+
+      - name: Lint with flake8
+        run: |
+          # Stop the build if there are Python syntax errors or undefined names
+          flake8 src/ --count --select=E9,F63,F7,F82 --show-source --statistics
+          # Exit-zero treats all errors as warnings. GitHub editor is 127 chars wide
+          flake8 src/ --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+
+      - name: Test imports
+        run: |
+          cd src
+          python -c "
+          import sys
+          try:
+              from config_settings import *
+              print('✅ Config imports successful')
+          except Exception as e:
+              print(f'❌ Config import error: {e}')
+              sys.exit(1)
+
+          try:
+              import bot_commands
+              print('✅ Bot commands module imports successful')
+          except Exception as e:
+              print(f'❌ Bot commands import error: {e}')
+              sys.exit(1)
+
+          try:
+              from finance_core.export import process_csv_file
+              from finance_core.session_management import session_exists
+              from finance_core.csv_helper import load_transactions_from_csv
+              print('✅ Finance core modules import successful')
+          except Exception as e:
+              print(f'❌ Finance core import error: {e}')
+              sys.exit(1)
+
+          print('🎉 All imports successful!')
+          "
+
+      - name: Test configuration
+        run: |
+          cd src
+          cp config_settings.example.py config_settings.py
+          python -c "
+          from config_settings import DISCORD_TOKEN, DAILY_REMINDER_TIME
+          print(f'Token placeholder: {DISCORD_TOKEN}')
+          print(f'Reminder time: {DAILY_REMINDER_TIME}')
+          print('✅ Configuration test passed')
+          "
+
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run Bandit Security Scan
+        run: |
+          pip install bandit
+          bandit -r src/ -f json -o bandit-report.json || true
+
+      - name: Check for secrets
+        run: |
+          # Check if any secrets might be committed
+          if grep -r "discord_token\|bot_token\|api_key" src/ --exclude-dir=__pycache__ || true; then
+            echo "⚠️ Potential secrets found in code"
+          else
+            echo "✅ No obvious secrets found"
+          fi
