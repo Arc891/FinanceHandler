@@ -1,5 +1,0 @@
-{
-    "keyPath": "enablebanking/asn_app_key.pem",
-    "applicationId": "948029f9-7696-4a76-a4fa-fc8d846e9269",
-    "redirectUrl": "http://localhost:8080/callback"
-}
