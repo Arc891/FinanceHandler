@@ -14,6 +14,7 @@ chmod +x setup.sh
 ### Manual Setup
 
 1. **Create virtual environment**
+
    ```bash
    python3 -m venv venv
    source venv/bin/activate  # Linux/Mac
@@ -22,11 +23,13 @@ chmod +x setup.sh
    ```
 
 2. **Install dependencies**
+
    ```bash
    pip install -r requirements.txt
    ```
 
 3. **Copy configuration**
+
    ```bash
    cp .env.example .env
    cp src/config_settings.example.py src/config_settings.py
@@ -38,7 +41,7 @@ chmod +x setup.sh
 
 ## Project Structure
 
-```
+```txt
 FinanceAutomation/
 ├── .github/workflows/       # GitHub Actions CI/CD
 ├── src/                     # Source code
@@ -119,6 +122,7 @@ class TransactionProcessor:
 ### Bot Permissions
 
 Your bot needs these permissions:
+
 - Send Messages
 - Use Slash Commands
 - Read Message History
@@ -188,12 +192,14 @@ python -c "from finance_core.csv_helper import load_transactions_from_csv"
 ### Adding New Categories
 
 1. Edit `src/constants.py`:
+
    ```python
    class ExpenseCategory(str, Enum):
        NEW_CATEGORY = ("New Category", r"new|category")
    ```
 
 2. Add auto-categorization rules:
+
    ```python
    CATEGORIZATION_RULES_EXPENSE = {
        r"pattern": ("Description", ExpenseCategory.NEW_CATEGORY),
@@ -203,6 +209,7 @@ python -c "from finance_core.csv_helper import load_transactions_from_csv"
 ### Adding New Commands
 
 1. Add to `src/bot_commands.py`:
+
    ```python
    @app_commands.command(name="newcommand", description="Description")
    async def new_command(self, interaction: discord.Interaction):

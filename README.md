@@ -29,23 +29,27 @@ A Discord bot for automated processing and categorization of financial transacti
 ### Installation
 
 1. **Clone the repository**
+
    ```bash
    git clone <your-repo-url>
    cd FinanceAutomation
    ```
 
 2. **Create virtual environment**
+
    ```bash
    python -m venv venv
    source venv/bin/activate  # On Windows: venv\Scripts\activate
    ```
 
 3. **Install dependencies**
+
    ```bash
    pip install -r requirements.txt
    ```
 
 4. **Configure the bot**
+
    ```bash
    # Copy environment template
    cp .env.example .env
@@ -62,6 +66,7 @@ A Discord bot for automated processing and categorization of financial transacti
    - Enable required intents: Message Content, Server Members
 
 6. **Run the bot**
+
    ```bash
    cd src
    python bot.py
@@ -96,6 +101,7 @@ MENTION_USER_IDS: List[int] = [
 ## CSV Format
 
 The bot expects CSV files with the following columns (ASN Bank format):
+
 - Date
 - Account IBAN
 - Counterparty IBAN
@@ -179,7 +185,7 @@ The bot will send daily reminders at 09:00 (configurable) to upload CSV files fo
 
 ## File Structure
 
-```
+```txt
 src/
 ├── bot.py                    # Main bot file
 ├── bot_commands.py           # Slash command definitions
@@ -194,7 +200,7 @@ src/
         └── transaction_prompt.py # Interactive UI components
 ```
 
-## Configuration
+## Environment Configuration
 
 - **Daily reminder time**: Edit `DAILY_REMINDER_TIME` in `config.py`
 - **File upload directory**: Edit `UPLOAD_DIR` in `config.py`

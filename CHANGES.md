@@ -3,33 +3,38 @@
 ## Changes Made
 
 ### 1. **Modernized Bot Architecture**
+
 - **Updated to Discord.py 2.x**: Changed from legacy message commands to modern slash commands
 - **Added Extension Loading**: Bot now loads `bot_commands.py` as a cog extension
 - **Better Error Handling**: Added comprehensive error handling for commands and tasks
 - **Improved Logging**: Added status messages and error reporting
 
 ### 2. **Fixed Import Issues**
+
 - **Resolved Config Conflicts**: Renamed `config.py` to `config_settings.py` to avoid conflict with `config/` directory
 - **Added Missing Modules**: Created `__init__.py` files for all packages
 - **Updated Import Statements**: Fixed all import paths to work with the new structure
 
 ### 3. **Enhanced Configuration**
+
 - **Environment Variable Support**: Added `.env` file support with python-dotenv
 - **Flexible Configuration**: Settings can be set via environment variables or config file
 - **Better Defaults**: Improved default values and validation
 
 ### 4. **Updated Command Structure**
+
 - **Slash Commands**: All commands now use modern Discord slash command syntax
 - **Better UX**: Improved user messages with emojis and clearer feedback
 - **Error Recovery**: Added proper error handling and user feedback
 
 ### 5. **Compatibility Layer**
+
 - **Dual Support**: Updated `process_csv_file()` to work with both old Context and new Interaction objects
 - **Backward Compatibility**: Legacy functionality preserved while adding modern features
 
 ## New File Structure
 
-```
+```txt
 src/
 ├── bot.py                     # ✅ Updated - Modern bot with extension loading
 ├── bot_commands.py            # ✅ Updated - Enhanced slash commands
@@ -54,7 +59,8 @@ src/
 ## Key Features Now Working
 
 ### ✅ **Modern Discord Commands**
-```
+
+```txt
 /upload    - Upload CSV files with drag & drop
 /resume    - Resume interrupted sessions  
 /status    - Check processing progress
@@ -62,18 +68,21 @@ src/
 ```
 
 ### ✅ **Daily Reminders**
+
 - Configurable time (default 09:00)
 - User mention support
 - Channel targeting
 - Error resilience
 
 ### ✅ **Session Management**
+
 - Persistent sessions across bot restarts
 - User-specific file handling
 - Progress tracking
 - Error recovery
 
 ### ✅ **Enhanced Error Handling**
+
 - Import validation
 - Runtime error recovery
 - User-friendly error messages
@@ -82,6 +91,7 @@ src/
 ## Next Steps
 
 ### 1. **Configuration**
+
 ```bash
 # Copy environment template
 cp .env.example .env
@@ -92,7 +102,9 @@ REMINDER_CHANNEL_ID=your_channel_id
 ```
 
 ### 2. **Add User IDs**
+
 Edit `config_settings.py`:
+
 ```python
 MENTION_USER_IDS: List[int] = [
     123456789012345678,  # Your Discord user ID
@@ -101,6 +113,7 @@ MENTION_USER_IDS: List[int] = [
 ```
 
 ### 3. **Run the Bot**
+
 ```bash
 cd src
 source ../venv/bin/activate  # If using virtual environment
@@ -110,6 +123,7 @@ python bot.py
 ## Testing
 
 All imports and basic functionality tested and working:
+
 - ✅ Configuration loading
 - ✅ Discord.py integration  
 - ✅ Extension loading
