@@ -48,13 +48,18 @@ jobs:
           mkdir -p data/uploads
           echo "✅ Data directories created"
 
+      - name: Setup configuration
+        run: |
+          cp src/config_settings.example.py src/config_settings.py
+          echo "✅ Configuration file created from template"
+
       - name: Test imports
         run: |
           python -c "
           import sys
           import os
           sys.path.append('src')
-
+          
           try:
               from config_settings import *
               print('✅ Config imports successful')
@@ -80,11 +85,8 @@ jobs:
               sys.exit(1)
 
           print('🎉 All imports successful!')
-          "
-
-      - name: Test configuration
+          "      - name: Test configuration
         run: |
-          cp src/config_settings.example.py src/config_settings.py
           python -c "
           import sys
           sys.path.append('src')
