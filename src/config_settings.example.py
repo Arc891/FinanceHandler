@@ -24,7 +24,7 @@ GOOGLE_SHEETS_ENABLED = os.getenv("GOOGLE_SHEETS_ENABLED", "true").lower() == "t
 GOOGLE_CREDENTIALS_PATH = os.getenv("GOOGLE_CREDENTIALS_PATH", "config/google_service_account.json")
 
 # File Upload Configuration
-UPLOAD_DIR = "data/uploads"
+UPLOAD_DIR = "uploads"
 SESSION_DIR = "sessions"
 
 # Ensure directories exist

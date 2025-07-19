@@ -78,17 +78,22 @@ class GoogleSheetsExporter:
         # Extract description from multiple sources
         description_parts = []
         
-        # Add counterparty information
-        debtor_name = transaction.get("debtor", {}).get("name", "")
-        creditor_name = transaction.get("creditor", {}).get("name", "")
-        counterparty = debtor_name or creditor_name
-        if counterparty:
-            description_parts.append(counterparty)
-        
-        # Add remittance information
-        remittance = transaction.get("remittance_information", [])
-        if remittance and remittance[0]:
-            description_parts.append(remittance[0])
+        # Check for provided description first (highest priority)
+        if user_desc := transaction.get("description"):
+            description_parts.append(user_desc)
+        else:
+            # Fallback to auto-extracting from bank data
+            # Add counterparty information
+            debtor_name = transaction.get("debtor", {}).get("name", "")
+            creditor_name = transaction.get("creditor", {}).get("name", "")
+            counterparty = debtor_name or creditor_name
+            if counterparty:
+                description_parts.append(counterparty)
+            
+            # Add remittance information
+            remittance = transaction.get("remittance_information", [])
+            if remittance and remittance[0]:
+                description_parts.append(remittance[0])
         
         # Combine description parts
         description = " - ".join(description_parts) if description_parts else "Unknown Transaction"
@@ -141,14 +146,14 @@ class GoogleSheetsExporter:
             if expense_values:
                 end_row_exp = 1 + len(expense_values)  # +1 because we start from row 2
                 range_exp = f"B2:E{end_row_exp + 1}"
-                sheet.update(range_exp, expense_values)
+                sheet.update(expense_values, range_exp)
                 logger.info(f"✅ Wrote {len(expense_values)} expenses to {range_exp}")
             
             # Write incomes to columns G-J (starting from row 2)
             if income_values:
                 end_row_inc = 1 + len(income_values)  # +1 because we start from row 2
                 range_inc = f"G2:J{end_row_inc + 1}"
-                sheet.update(range_inc, income_values)
+                sheet.update(income_values, range_inc)
                 logger.info(f"✅ Wrote {len(income_values)} incomes to {range_inc}")
             
             logger.info(f"🎉 Successfully exported {len(expense_values)} expenses and {len(income_values)} incomes to Google Sheets")

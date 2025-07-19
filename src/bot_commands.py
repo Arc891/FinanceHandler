@@ -23,33 +23,43 @@ class FinanceBot(commands.Cog):
     async def resume(self, interaction: discord.Interaction):
         user_id = interaction.user.id
         if not session_exists(user_id):
-            await interaction.response.send_message("❌ There is no session to resume.", ephemeral=True)
+            await interaction.response.send_message("❌ No session to resume.", ephemeral=True)
+            # Auto-delete after 3 seconds
+            import asyncio
+            response = await interaction.original_response()
+            asyncio.create_task(self._delete_after_delay(response, 3))
             return
 
-        await interaction.response.send_message("🔄 Resuming your saved transaction session...", ephemeral=True)
+        await interaction.response.send_message("🔄 Resuming session...", ephemeral=True)
         await process_csv_file(file_path=None, ctx_or_interaction=interaction)
 
     @app_commands.command(name="status", description="Check your current finance session status")
     async def status(self, interaction: discord.Interaction):
         user_id = interaction.user.id
         if not session_exists(user_id):
-            await interaction.response.send_message("❌ You have no active session.", ephemeral=True)
+            await interaction.response.send_message("❌ No active session.", ephemeral=True)
+            # Auto-delete after 3 seconds
+            import asyncio
+            response = await interaction.original_response()
+            asyncio.create_task(self._delete_after_delay(response, 3))
             return
 
         remaining, income, expenses = load_session(user_id)
-        embed = discord.Embed(title="📊 Session Status", color=discord.Color.blue())
-        embed.add_field(name="⏳ Remaining", value=len(remaining), inline=True)
-        embed.add_field(name="💵 Income", value=len(income), inline=True)
-        embed.add_field(name="💸 Expenses", value=len(expenses), inline=True)
-        
         total_transactions = len(remaining) + len(income) + len(expenses)
         processed = len(income) + len(expenses)
+        progress_percent = (processed / total_transactions) * 100 if total_transactions > 0 else 0
         
-        if total_transactions > 0:
-            progress_percent = (processed / total_transactions) * 100
-            embed.add_field(name="📈 Progress", value=f"{progress_percent:.1f}% ({processed}/{total_transactions})", inline=False)
+        status_msg = f"📊 **Session Status**\n"
+        status_msg += f"⏳ Remaining: {len(remaining)} | "
+        status_msg += f"💵 Income: {len(income)} | "
+        status_msg += f"💸 Expenses: {len(expenses)}\n"
+        status_msg += f"📈 Progress: {progress_percent:.1f}% ({processed}/{total_transactions})"
         
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        await interaction.response.send_message(status_msg, ephemeral=True)
+        # Auto-delete after 8 seconds
+        import asyncio
+        response = await interaction.original_response()
+        asyncio.create_task(self._delete_after_delay(response, 8))
 
     @app_commands.command(name="export", description="Export your categorized transactions to Google Sheets")
     async def export_transactions(self, interaction: discord.Interaction):
@@ -84,74 +94,94 @@ class FinanceBot(commands.Cog):
         try:
             expense_count, income_count = export_to_google_sheets(income, expenses)
             
-            embed = discord.Embed(
-                title="✅ Export Successful!",
-                description="Your transactions have been exported to Google Sheets.",
-                color=discord.Color.green()
-            )
-            embed.add_field(name="💸 Expenses", value=str(expense_count), inline=True)
-            embed.add_field(name="💵 Income", value=str(income_count), inline=True)
-            embed.add_field(name="📊 Total", value=str(expense_count + income_count), inline=True)
-            
             # Clear the session after successful export
             clear_session(user_id)
-            embed.add_field(name="🗑️ Session", value="Cleared after export", inline=False)
+            
+            # Send concise success message
+            message = f"✅ Exported {expense_count + income_count} transactions ({income_count} income, {expense_count} expenses) to Google Sheets!"
             
             if interaction.response.is_done():
-                await interaction.followup.send(embed=embed, ephemeral=True)
+                response = await interaction.followup.send(message, ephemeral=True)
             else:
-                await interaction.response.send_message(embed=embed, ephemeral=True)
+                await interaction.response.send_message(message, ephemeral=True)
+                response = await interaction.original_response()
+            
+            # Auto-delete after 8 seconds
+            import asyncio
+            asyncio.create_task(self._delete_after_delay(response, 8))
                 
         except FileNotFoundError:
-            error_embed = discord.Embed(
-                title="❌ Configuration Error",
-                description="Google service account credentials not found.",
-                color=discord.Color.red()
-            )
-            error_embed.add_field(
-                name="Setup Required",
-                value="Please ensure `google_service_account.json` is in the `src/config/` directory.",
-                inline=False
-            )
+            error_msg = "❌ Google credentials not found. Check `src/config/google_service_account.json`"
             
             if interaction.response.is_done():
-                await interaction.followup.send(embed=error_embed, ephemeral=True)
+                response = await interaction.followup.send(error_msg, ephemeral=True)
             else:
-                await interaction.response.send_message(embed=error_embed, ephemeral=True)
+                await interaction.response.send_message(error_msg, ephemeral=True)
+                response = await interaction.original_response()
+            
+            # Auto-delete error after 10 seconds
+            import asyncio
+            asyncio.create_task(self._delete_after_delay(response, 10))
                 
         except Exception as e:
             logger.error(f"Export failed for user {user_id}: {str(e)}")
-            error_embed = discord.Embed(
-                title="❌ Export Failed",
-                description=f"An error occurred during export: {str(e)}",
-                color=discord.Color.red()
-            )
+            error_msg = f"❌ Export failed: {str(e)}"
             
             if interaction.response.is_done():
-                await interaction.followup.send(embed=error_embed, ephemeral=True)
+                response = await interaction.followup.send(error_msg, ephemeral=True)
             else:
-                await interaction.response.send_message(embed=error_embed, ephemeral=True)
+                await interaction.response.send_message(error_msg, ephemeral=True)
+                response = await interaction.original_response()
+            
+            # Auto-delete error after 10 seconds
+            import asyncio
+            asyncio.create_task(self._delete_after_delay(response, 10))
+
+    async def _delete_after_delay(self, message, delay: int):
+        """Delete a message after a delay"""
+        import asyncio
+        await asyncio.sleep(delay)
+        try:
+            await message.delete()
+        except:
+            pass  # Message might already be deleted
 
     @app_commands.command(name="cancel", description="Cancel and delete your current session")
     async def cancel(self, interaction: discord.Interaction):
         user_id = interaction.user.id
         if not session_exists(user_id):
             await interaction.response.send_message("❌ No session to cancel.", ephemeral=True)
+            # Auto-delete after 3 seconds
+            import asyncio
+            response = await interaction.original_response()
+            asyncio.create_task(self._delete_after_delay(response, 3))
             return
 
         clear_session(user_id)
-        await interaction.response.send_message("❌ Your session has been canceled and data cleared.", ephemeral=True)
+        await interaction.response.send_message("✅ Session canceled and data cleared.", ephemeral=True)
+        # Auto-delete after 5 seconds
+        import asyncio
+        response = await interaction.original_response()
+        asyncio.create_task(self._delete_after_delay(response, 5))
 
     @app_commands.command(name="upload", description="Upload a CSV file to start processing transactions")
     async def upload(self, interaction: discord.Interaction, attachment: discord.Attachment):
         user_id = interaction.user.id
 
         if session_exists(user_id):
-            await interaction.response.send_message("⚠️ You already have an active session. Please finish or cancel it first.", ephemeral=True)
+            await interaction.response.send_message("⚠️ Active session exists. Use `/cancel` first.", ephemeral=True)
+            # Auto-delete after 5 seconds
+            import asyncio
+            response = await interaction.original_response()
+            asyncio.create_task(self._delete_after_delay(response, 5))
             return
 
         if not attachment.filename.endswith(".csv"):
-            await interaction.response.send_message("❌ Please upload a valid CSV file.", ephemeral=True)
+            await interaction.response.send_message("❌ Please upload a CSV file.", ephemeral=True)
+            # Auto-delete after 4 seconds
+            import asyncio
+            response = await interaction.original_response()
+            asyncio.create_task(self._delete_after_delay(response, 4))
             return
 
         # Create user-specific filename to avoid conflicts
@@ -160,10 +190,14 @@ class FinanceBot(commands.Cog):
 
         try:
             await attachment.save(Path(file_path))
-            await interaction.response.send_message("📥 File received. Processing...", ephemeral=True)
+            await interaction.response.send_message("📥 Processing CSV file...", ephemeral=True)
             await process_csv_file(file_path=file_path, ctx_or_interaction=interaction)
         except Exception as e:
-            await interaction.response.send_message(f"❌ Error processing file: {str(e)}", ephemeral=True)
+            await interaction.response.send_message(f"❌ Error: {str(e)}", ephemeral=True)
+            # Auto-delete error after 8 seconds
+            import asyncio
+            response = await interaction.original_response()
+            asyncio.create_task(self._delete_after_delay(response, 8))
             # Clean up file if it exists
             if os.path.exists(file_path):
                 os.remove(file_path)
