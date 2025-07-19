@@ -23,7 +23,7 @@ class ExpenseCategory(str, Enum):
 
     ABBONEMENTEN            = ("Abbonementen",            r"ab")
     ANDER                   = ("Ander",                   r"an")
-    AUTO_VERVOER            = ("Auto / vervoer",          r"au")
+    AUTO_VERVOER_OV         = ("Auto / vervoer / OV",     r"au")
     BOODSCHAPPEN            = ("Boodschappen",            r"bo")
     CADEAUTJES              = ("Cadeautjes",              r"ca")
     DATES_UITJES            = ("Dates/uitjes",            r"da|ui")
@@ -34,7 +34,7 @@ class ExpenseCategory(str, Enum):
     PERSOONLIJK_VRIJ_GELD   = ("Persoonlijk vrij geld",   r"pvg")
     PERSOONLIJKE_VERZORGING = ("Persoonlijke verzorging", r"pvz")
     REKENINGEN              = ("Rekeningen",              r"re")
-    OV                      = ("OV",                      r"ov")
+    SNACKEN                 = ("Snacken",                 r"sn")
     UIT_SPAARPOTJE          = ("Uit spaarpotje",          r"us")
     NOG_IN_TEDELEN          = ("! Nog in te delen !",     r"nog|!")
     VERZEKERINGEN           = ("Verzekeringen",           r"ve")
@@ -82,8 +82,8 @@ CATEGORIZATION_RULES_EXPENSE = {
     r"ODIDO":                          ("{c} Internet/TV", ExpenseCategory.ABBONEMENTEN),
     r"geldmaat": ("{c}", ExpenseCategory.ANDER),
     r"Kuario": ("Printen Bieb Driebergen", ExpenseCategory.ANDER),
-    r"TinQ|Tango":   ("{c} tanken", ExpenseCategory.AUTO_VERVOER),
-    r"Greenwheels":  ("{c} auto",   ExpenseCategory.AUTO_VERVOER),
+    r"TinQ|Tango":   ("{c} tanken", ExpenseCategory.AUTO_VERVOER_OV),
+    r"Greenwheels":  ("{c} auto",   ExpenseCategory.AUTO_VERVOER_OV),
     r"JUMBO|PICNIC|LIDL|AH|ALBERT HEIJN|VOMAR|PLUS|Fruitcompany": ("{c} inkopen", ExpenseCategory.BOODSCHAPPEN),
     r"Huiskamer":  ("{c} snackje", ExpenseCategory.BOODSCHAPPEN),
     r"snack company|snackbar traay": ("{c} eten", ExpenseCategory.DATES_UITJES),
@@ -93,7 +93,7 @@ CATEGORIZATION_RULES_EXPENSE = {
     r"(?i)(?=.*\b(?:donatie|gift|bijdrage)\b).*?\W ([A-Za-z0-9 &\-\.]+)$": ("Donatie/bijdrage aan {c}", ExpenseCategory.GOEIE_DOELEN),
     r"Kantoor der Kerkelijke Goederen": ("Huur {c}", ExpenseCategory.HUISHOUDEN),
     r"maandelijks spaargeld - (\w+)": ("Sparen - {c}", ExpenseCategory.NAAR_SPAARPOTJES),
-    r"ovpay|NS": ("{c} OV kosten", ExpenseCategory.OV),
+    r"ovpay": ("{c} OV kosten", ExpenseCategory.AUTO_VERVOER_OV),
     r"vrij geld (\w+)": ("Vrij geld {c}", ExpenseCategory.PERSOONLIJK_VRIJ_GELD),
     r"Bolhaar": ("{c} zorgkosten", ExpenseCategory.REKENINGEN),
     r"(\w+) PROMOVENDUM": ("Promovendum {c}", ExpenseCategory.VERZEKERINGEN),
