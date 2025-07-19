@@ -1,14 +1,4 @@
-# Di## Features
-
-- 🤖 **Modern Discord Bot** with slash commands
-- 📊 **CSV Transaction Processing** from bank exports
-- 🏷️ **Interactive Categorization** with Discord UI
-- 💾 **Session Management** for resuming interrupted processes
-- ⏰ **Daily Reminders** for transaction processing
-- 🔄 **Auto-categorization** with customizable rules
-- 📈 **Google Sheets Export** for further analysisnance Bot
-
-A Discord bot for automated processing and categorization of financial transactions from CSV exports.
+# Discord Finance Automation Bot
 
 ## Features
 
