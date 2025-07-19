@@ -73,16 +73,20 @@ htmlcov/
 .dmypy.json
 dmypy.json
 
-# Finance data and uploads
-uploads/
-src/data/uploads/
+# Data directories (runtime files)
+data/sessions/
+data/uploads/
 *.csv
 *.xlsx
 *.xls
 transactie-historie*.csv
 
-# Session data
+# Legacy directories (in case they exist)
+uploads/
 sessions/
+src/uploads/
+src/sessions/
+src/data/uploads/
 src/sessions/
 *.session
 

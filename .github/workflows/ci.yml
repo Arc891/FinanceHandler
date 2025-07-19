@@ -42,11 +42,19 @@ jobs:
           # Exit-zero treats all errors as warnings. GitHub editor is 127 chars wide
           flake8 src/ --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
 
+      - name: Create data directories
+        run: |
+          mkdir -p data/sessions
+          mkdir -p data/uploads
+          echo "✅ Data directories created"
+
       - name: Test imports
         run: |
-          cd src
           python -c "
           import sys
+          import os
+          sys.path.append('src')
+          
           try:
               from config_settings import *
               print('✅ Config imports successful')
@@ -63,9 +71,10 @@ jobs:
 
           try:
               from finance_core.export import process_csv_file
-              from finance_core.session_management import session_exists
+              from finance_core.session_management import session_exists, SESSION_DIR
               from finance_core.csv_helper import load_transactions_from_csv
               print('✅ Finance core modules import successful')
+              print(f'✅ Session directory resolved to: {SESSION_DIR}')
           except Exception as e:
               print(f'❌ Finance core import error: {e}')
               sys.exit(1)
@@ -75,13 +84,48 @@ jobs:
 
       - name: Test configuration
         run: |
-          cd src
-          cp config_settings.example.py config_settings.py
+          cp src/config_settings.example.py src/config_settings.py
           python -c "
-          from config_settings import DISCORD_TOKEN, DAILY_REMINDER_TIME
+          import sys
+          sys.path.append('src')
+          from config_settings import DISCORD_TOKEN, DAILY_REMINDER_TIME, UPLOAD_DIR, SESSION_DIR
           print(f'Token placeholder: {DISCORD_TOKEN}')
           print(f'Reminder time: {DAILY_REMINDER_TIME}')
+          print(f'Upload directory: {UPLOAD_DIR}')
+          print(f'Session directory: {SESSION_DIR}')
           print('✅ Configuration test passed')
+          "
+
+      - name: Test data directory structure
+        run: |
+          python -c "
+          import sys
+          import os
+          sys.path.append('src')
+          
+          from finance_core.session_management import SESSION_DIR
+          from config_settings import UPLOAD_DIR
+          
+          print(f'Session directory resolved to: {SESSION_DIR}')
+          print(f'Upload directory configured as: {UPLOAD_DIR}')
+          
+          # Check if directories exist
+          print(f'Session directory exists: {os.path.exists(SESSION_DIR)}')
+          upload_abs_path = os.path.join(os.getcwd(), UPLOAD_DIR)
+          print(f'Upload directory exists: {os.path.exists(upload_abs_path)}')
+          
+          # Test path independence - run from different directories
+          os.chdir('src')
+          from finance_core.session_management import SESSION_DIR as session_from_src
+          print(f'Session directory from src/: {session_from_src}')
+          
+          if SESSION_DIR == session_from_src:
+              print('✅ Path resolution is working directory independent')
+          else:
+              print('❌ Path resolution is working directory dependent')
+              sys.exit(1)
+          
+          print('✅ Data directory structure test passed')
           "
 
   security:
@@ -97,7 +141,7 @@ jobs:
       - name: Check for secrets
         run: |
           # Check if any secrets might be committed
-          if grep -r "discord_token\|bot_token\|api_key" src/ --exclude-dir=__pycache__ || true; then
+          if grep -r "discord_token\|bot_token\|api_key" src/ --exclude-dir=__pycache__ --exclude="*.example.*" || true; then
             echo "⚠️ Potential secrets found in code"
           else
             echo "✅ No obvious secrets found"
