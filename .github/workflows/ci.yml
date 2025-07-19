@@ -54,7 +54,7 @@ jobs:
           import sys
           import os
           sys.path.append('src')
-          
+
           try:
               from config_settings import *
               print('✅ Config imports successful')
@@ -102,29 +102,29 @@ jobs:
           import sys
           import os
           sys.path.append('src')
-          
+
           from finance_core.session_management import SESSION_DIR
           from config_settings import UPLOAD_DIR
-          
+
           print(f'Session directory resolved to: {SESSION_DIR}')
           print(f'Upload directory configured as: {UPLOAD_DIR}')
-          
+
           # Check if directories exist
           print(f'Session directory exists: {os.path.exists(SESSION_DIR)}')
           upload_abs_path = os.path.join(os.getcwd(), UPLOAD_DIR)
           print(f'Upload directory exists: {os.path.exists(upload_abs_path)}')
-          
+
           # Test path independence - run from different directories
           os.chdir('src')
           from finance_core.session_management import SESSION_DIR as session_from_src
           print(f'Session directory from src/: {session_from_src}')
-          
+
           if SESSION_DIR == session_from_src:
               print('✅ Path resolution is working directory independent')
           else:
               print('❌ Path resolution is working directory dependent')
               sys.exit(1)
-          
+
           print('✅ Data directory structure test passed')
           "
 
