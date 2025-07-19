@@ -24,12 +24,16 @@ GOOGLE_SHEETS_ENABLED = os.getenv("GOOGLE_SHEETS_ENABLED", "true").lower() == "t
 GOOGLE_CREDENTIALS_PATH = os.getenv("GOOGLE_CREDENTIALS_PATH", "config/google_service_account.json")
 
 # File Upload Configuration
-UPLOAD_DIR = "uploads"
-SESSION_DIR = "sessions"
+UPLOAD_DIR = "data/uploads"
+
+# Session Configuration  
+SESSION_DIR = "data/sessions"
 
 # Ensure directories exist
-os.makedirs(UPLOAD_DIR, exist_ok=True) 
-os.makedirs(SESSION_DIR, exist_ok=True)
+# Create absolute paths relative to project root
+_project_root = os.path.dirname(os.path.dirname(__file__))
+_upload_path = os.path.join(_project_root, UPLOAD_DIR)
+os.makedirs(_upload_path, exist_ok=True)
 os.makedirs("config", exist_ok=True)
 
 # Export all config variables

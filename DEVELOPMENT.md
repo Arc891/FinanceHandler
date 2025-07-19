@@ -67,6 +67,9 @@ FinanceAutomation/
 │   └── config/             # Configuration files
 │       ├── google_service_account.json # Google API credentials (not in git)
 │       └── spaarpot_uuid_map.py # Savings account mapping
+├── data/                   # Runtime data (auto-created)
+│   ├── sessions/           # User session files
+│   └── uploads/            # Uploaded CSV files
 ├── requirements.txt        # Python dependencies
 ├── .env.example           # Environment template
 ├── .gitignore             # Git ignore rules
@@ -219,6 +222,52 @@ To test Google Sheets functionality:
 2. Use `/upload` with a test CSV file
 3. Test the categorization UI
 4. Test session resume functionality
+
+## Data Directory Structure
+
+The bot uses a dedicated `data/` directory for runtime files, keeping source code separate from user data:
+
+```txt
+data/
+├── sessions/           # User session persistence files
+│   └── {user_id}.json # Session data for resuming interrupted processing
+└── uploads/            # User-uploaded CSV files
+    └── {user_id}_{filename}.csv
+```
+
+### Path Configuration
+
+All directory paths are configured in `src/config_settings.py`:
+
+```python
+UPLOAD_DIR = "data/uploads"    # Relative to project root
+SESSION_DIR = "data/sessions"  # Relative to project root
+```
+
+The session management system automatically calculates absolute paths from the project root, ensuring consistent behavior regardless of the working directory when the bot is started.
+
+### Working Directory Independence
+
+The bot can be started from any directory within the project. The path resolution system:
+
+1. Locates the project root using the source file locations
+2. Creates absolute paths for data directories
+3. Automatically creates missing directories
+
+This means all these commands work equivalently:
+
+```bash
+# From project root
+python src/bot.py
+
+# From src directory
+cd src
+python bot.py
+
+# From any subdirectory
+cd src/finance_core
+python ../bot.py
+```
 
 ## Adding New Features
 

@@ -4,7 +4,23 @@ import os
 import json
 from typing import List, Dict, Any, Tuple
 
-SESSION_DIR = "sessions"
+# Import session directory from config
+try:
+    from config_settings import SESSION_DIR as _SESSION_DIR
+    # Make the session directory absolute relative to the project root
+    # This file is at: finance_core/session_management.py
+    # Go up: finance_core -> src -> project_root (two levels up)
+    _this_file = os.path.abspath(__file__)
+    _src_dir = os.path.dirname(os.path.dirname(_this_file))
+    _project_root = os.path.dirname(_src_dir)
+    SESSION_DIR = os.path.join(_project_root, _SESSION_DIR)
+except ImportError:
+    # Fallback: use absolute path from current file location
+    _this_file = os.path.abspath(__file__)
+    _src_dir = os.path.dirname(os.path.dirname(_this_file))
+    _project_root = os.path.dirname(_src_dir)
+    SESSION_DIR = os.path.join(_project_root, "data/sessions")
+
 os.makedirs(SESSION_DIR, exist_ok=True)
 
 def get_session_path(user_id: int) -> str:

@@ -229,14 +229,28 @@ src/
     ├── session_management.py # Session persistence
     └── ui/
         └── transaction_prompt.py # Interactive UI components
+
+data/                         # Runtime data directory
+├── sessions/                 # User session persistence
+└── uploads/                  # Uploaded CSV files
 ```
 
 ## Environment Configuration
 
-- **Daily reminder time**: Edit `DAILY_REMINDER_TIME` in `config.py`
-- **File upload directory**: Edit `UPLOAD_DIR` in `config.py`
+- **Daily reminder time**: Edit `DAILY_REMINDER_TIME` in `config_settings.py`
+- **Upload directory**: Edit `UPLOAD_DIR` in `config_settings.py` (default: `data/uploads`)
+- **Session directory**: Edit `SESSION_DIR` in `config_settings.py` (default: `data/sessions`)
 - **Transaction categories**: Edit `ExpenseCategory` and `IncomeCategory` in `constants.py`
 - **Auto-categorization rules**: Edit `CATEGORIZATION_RULES_*` in `constants.py`
+
+### Data Directory Structure
+
+The bot uses a dedicated `data/` directory for runtime files:
+
+- `data/sessions/` - User session files for resuming interrupted processing
+- `data/uploads/` - Uploaded CSV files from Discord
+
+These directories are automatically created when the bot starts. This structure keeps source code separate from runtime data.
 
 ## Troubleshooting
 

@@ -12,6 +12,7 @@ from finance_core.session_management import (
 )
 from finance_core.export import process_csv_file
 from finance_core.google_sheets import export_to_google_sheets
+from config_settings import UPLOAD_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +56,10 @@ class FinanceBot(commands.Cog):
         status_msg += f"💸 Expenses: {len(expenses)}\n"
         status_msg += f"📈 Progress: {progress_percent:.1f}% ({processed}/{total_transactions})"
         
+        # Add export hint if there are categorized transactions
+        if processed > 0:
+            status_msg += f"\n💡 Use `/export` to save categorized transactions to Google Sheets"
+        
         await interaction.response.send_message(status_msg, ephemeral=True)
         # Auto-delete after 8 seconds
         import asyncio
@@ -76,11 +81,11 @@ class FinanceBot(commands.Cog):
         
         if remaining:
             embed = discord.Embed(
-                title="⚠️ Incomplete Session", 
-                description=f"You still have {len(remaining)} uncategorized transactions.", 
+                title="⚠️ Partial Export", 
+                description=f"You have {len(remaining)} uncategorized transactions remaining.", 
                 color=discord.Color.orange()
             )
-            embed.add_field(name="Options", value="• Use `/resume` to continue categorizing\n• Click 'Export Anyway' to export only categorized transactions", inline=False)
+            embed.add_field(name="Options", value="• Use `/resume` to continue categorizing\n• Click 'Export Now' to export categorized transactions and continue with remaining ones", inline=False)
             
             view = ExportConfirmView(user_id, income, expenses)
             await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
@@ -94,11 +99,19 @@ class FinanceBot(commands.Cog):
         try:
             expense_count, income_count = export_to_google_sheets(income, expenses)
             
-            # Clear the session after successful export
-            clear_session(user_id)
+            # Update session to remove exported transactions, keeping only remaining ones
+            remaining, _, _ = load_session(user_id)
+            if remaining:
+                # Keep the session alive with only remaining transactions
+                save_session(user_id, remaining, [], [])
+                session_status = f"Session updated: {len(remaining)} transactions remaining"
+            else:
+                # All transactions processed, clear the session
+                clear_session(user_id)
+                session_status = "Session completed and cleared"
             
             # Send concise success message
-            message = f"✅ Exported {expense_count + income_count} transactions ({income_count} income, {expense_count} expenses) to Google Sheets!"
+            message = f"✅ Exported {expense_count + income_count} transactions ({income_count} income, {expense_count} expenses) to Google Sheets!\n🔄 {session_status}"
             
             if interaction.response.is_done():
                 response = await interaction.followup.send(message, ephemeral=True)
@@ -185,8 +198,8 @@ class FinanceBot(commands.Cog):
             return
 
         # Create user-specific filename to avoid conflicts
-        file_path = os.path.join("uploads", f"{user_id}_{attachment.filename}")
-        os.makedirs("uploads", exist_ok=True)
+        file_path = os.path.join(UPLOAD_DIR, f"{user_id}_{attachment.filename}")
+        os.makedirs(UPLOAD_DIR, exist_ok=True)
 
         try:
             await attachment.save(Path(file_path))
@@ -206,13 +219,13 @@ class ExportConfirmView(discord.ui.View):
     """View for confirming export when there are still uncategorized transactions"""
     
     def __init__(self, user_id: int, income: list, expenses: list):
-        super().__init__(timeout=300)
+        super().__init__(timeout=None)  # No timeout to allow long-running sessions
         self.user_id = user_id
         self.income = income
         self.expenses = expenses
     
-    @discord.ui.button(label="Export Anyway", style=discord.ButtonStyle.primary, emoji="📤")
-    async def export_anyway(self, interaction: discord.Interaction, button: discord.ui.Button):
+    @discord.ui.button(label="Export Now", style=discord.ButtonStyle.primary, emoji="📤")
+    async def export_now(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id != self.user_id:
             await interaction.response.send_message("❌ You cannot use this button.", ephemeral=True)
             return
@@ -223,6 +236,19 @@ class ExportConfirmView(discord.ui.View):
         try:
             expense_count, income_count = export_to_google_sheets(self.income, self.expenses)
             
+            # Update session to remove exported transactions, keeping only remaining ones
+            remaining, _, _ = load_session(self.user_id)
+            if remaining:
+                # Keep the session alive with only remaining transactions
+                save_session(self.user_id, remaining, [], [])
+                session_status = f"{len(remaining)} transactions remaining"
+                session_emoji = "🔄"
+            else:
+                # All transactions processed, clear the session
+                clear_session(self.user_id)
+                session_status = "Session completed"
+                session_emoji = "✅"
+            
             embed = discord.Embed(
                 title="✅ Export Successful!",
                 description="Your transactions have been exported to Google Sheets.",
@@ -232,9 +258,7 @@ class ExportConfirmView(discord.ui.View):
             embed.add_field(name="💵 Income", value=str(income_count), inline=True)
             embed.add_field(name="📊 Total", value=str(expense_count + income_count), inline=True)
             
-            # Clear the session after successful export
-            clear_session(self.user_id)
-            embed.add_field(name="🗑️ Session", value="Cleared after export", inline=False)
+            embed.add_field(name=f"{session_emoji} Session", value=session_status, inline=False)
             
             await interaction.followup.send(embed=embed, ephemeral=True)
                 
@@ -248,7 +272,7 @@ class ExportConfirmView(discord.ui.View):
             await interaction.followup.send(embed=error_embed, ephemeral=True)
         
         # Disable the buttons
-        self.export_anyway.disabled = True
+        self.export_now.disabled = True
         self.continue_categorizing.disabled = True
         await interaction.edit_original_response(view=self)
     
@@ -262,7 +286,7 @@ class ExportConfirmView(discord.ui.View):
         await process_csv_file(file_path=None, ctx_or_interaction=interaction)
         
         # Disable the buttons
-        self.export_anyway.disabled = True
+        self.export_now.disabled = True
         self.continue_categorizing.disabled = True
         await interaction.edit_original_response(view=self)
 

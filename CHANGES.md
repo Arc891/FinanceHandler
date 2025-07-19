@@ -1,6 +1,24 @@
 # Bot.py Update Summary
 
-## Changes Made
+## Recent Changes
+
+### Data Directory Restructuring (Latest)
+
+- **Created Unified Data Directory**: Moved runtime data from mixed locations to `data/` directory
+- **Session Management Cleanup**: Moved sessions from `/sessions` and `/src/sessions` to `data/sessions/`
+- **Upload Organization**: Moved uploads from hardcoded paths to `data/uploads/`
+- **Path Independence**: Bot now works consistently regardless of working directory
+- **Configuration Centralization**: All directory paths now configurable in `config_settings.py`
+- **Documentation Updates**: Updated README.md and DEVELOPMENT.md with new structure
+
+### Benefits
+
+- Clean separation of source code and runtime data
+- Consistent path resolution from any working directory
+- Better project organization following Python best practices
+- Easier deployment and backup strategies
+
+## Previous Changes
 
 ### 1. **Modernized Bot Architecture**
 
