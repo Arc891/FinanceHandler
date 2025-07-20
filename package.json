@@ -1,0 +1,17 @@
+{
+  "name": "finance-automation-bot",
+  "version": "1.0.1",
+  "description": "Discord bot for automated finance tracking and transaction categorization",
+  "main": "src/bot.py",
+  "scripts": {
+    "start": "python src/bot.py",
+    "test": "python check_bot_setup.py"
+  },
+  "keywords": ["discord", "bot", "finance", "automation", "google-sheets"],
+  "author": "Arc891",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Arc891/FinanceHandler"
+  }
+}

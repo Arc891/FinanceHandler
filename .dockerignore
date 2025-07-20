@@ -1,0 +1,63 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Git
+.git/
+.gitignore
+
+# Logs
+*.log
+
+# Environment files
+.env
+.env.local
+
+# Session data (will be mounted as volume)
+data/sessions/*
+data/uploads/*
+
+# Development files
+check_bot_setup.py
+setup.sh
+DEVELOPMENT.md
+CHANGES.md
+
+# Test files
+transactie-historie_*.csv
+
+# Documentation
+README.md
