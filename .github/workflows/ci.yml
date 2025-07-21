@@ -178,14 +178,14 @@ jobs:
           echo "🔍 Checking for potential secrets in codebase..."
           
           # Check if any actual secrets might be committed (not in example files)
-          if grep -r "discord_token\|bot_token\|api_key" src/ --exclude-dir=__pycache__ --exclude="*.example.*" --exclude="config_settings.py" || true; then
+          if grep -r "discord_token\|bot_token\|api_key" src/ --exclude-dir=__pycache__ --exclude="*.example.*" --exclude="config_settings.py"; then
             echo "⚠️ Potential secrets found in code"
           else
             echo "✅ No obvious secrets found"
           fi
           
           # Check for hardcoded tokens or keys
-          if grep -rE "(token|key|secret|password)\s*=\s*['\"](sk-[A-Za-z0-9]{32,}|ghp_[A-Za-z0-9]{36,}|xoxb-[A-Za-z0-9-]{48,}|[A-Za-z0-9]{40,})['\"]" src/ --exclude-dir=__pycache__ --exclude="*.example.*" || true; then
+          if grep -rE "(token|key|secret|password)\s*=\s*['\"](sk-[A-Za-z0-9]{32,}|ghp_[A-Za-z0-9]{36,}|xoxb-[A-Za-z0-9-]{48,}|[A-Za-z0-9]{40,})['\"]" src/ --exclude-dir=__pycache__ --exclude="*.example.*"; then
             echo "⚠️ Potential hardcoded credentials found"
           else
             echo "✅ No hardcoded credentials detected"
