@@ -80,24 +80,23 @@ CATEGORIZATION_RULES_EXPENSE = {
     r"consumentenbond|ANWB":           ("{c}", ExpenseCategory.ABBONEMENTEN),
     r"lensplaza":                      ("Lenzen Janneke",  ExpenseCategory.ABBONEMENTEN),
     r"ODIDO":                          ("{c} Internet/TV", ExpenseCategory.ABBONEMENTEN),
-    r"geldmaat": ("{c}", ExpenseCategory.ANDER),
-    r"Kuario": ("Printen Bieb Driebergen", ExpenseCategory.ANDER),
-    r"TinQ|Tango":   ("{c} tanken", ExpenseCategory.AUTO_VERVOER_OV),
-    r"Greenwheels":  ("{c} auto",   ExpenseCategory.AUTO_VERVOER_OV),
-    r"JUMBO|PICNIC|LIDL|AH|ALBERT HEIJN|VOMAR|PLUS|Fruitcompany": ("{c} inkopen", ExpenseCategory.BOODSCHAPPEN),
-    r"Huiskamer":  ("{c} snackje", ExpenseCategory.BOODSCHAPPEN),
-    r"snack company|snackbar traay": ("{c} eten", ExpenseCategory.DATES_UITJES),
-    r"vitens":  ("{c} water",   ExpenseCategory.GAS_WATER_ELECTRA),
-    r"ENGIE":   ("{c} energie", ExpenseCategory.GAS_WATER_ELECTRA),
-    r"sponsorbijdrage": ("Compassion Midina", ExpenseCategory.GOEIE_DOELEN),
+    r"Kuario":                         ("Printen Bieb Driebergen", ExpenseCategory.ANDER),
+    r"TinQ|Tango":                     ("{c} tanken", ExpenseCategory.AUTO_VERVOER_OV),
+    r"Greenwheels":                    ("{c} auto",   ExpenseCategory.AUTO_VERVOER_OV),
+    r"ovpay|NS GROEP":                 ("{c} OV kosten", ExpenseCategory.AUTO_VERVOER_OV),
+    r"JUMBO|PICNIC|LIDL|AH to go|ALBERT HEIJN|VOMAR|PLUS|Fruitcompany": ("{c} inkopen", ExpenseCategory.BOODSCHAPPEN),
+    r"snack company|snackbar traay":   ("{c} eten", ExpenseCategory.DATES_UITJES),
+    r"vitens":                         ("{c} water", ExpenseCategory.GAS_WATER_ELECTRA),
+    r"ENGIE":                          ("{c} energie", ExpenseCategory.GAS_WATER_ELECTRA),
+    r"sponsorbijdrage":                ("Compassion Midina", ExpenseCategory.GOEIE_DOELEN),
     r"(?i)(?=.*\b(?:donatie|gift|bijdrage)\b).*?\W ([A-Za-z0-9 &\-\.]+)$": ("Donatie/bijdrage aan {c}", ExpenseCategory.GOEIE_DOELEN),
     r"Kantoor der Kerkelijke Goederen": ("Huur {c}", ExpenseCategory.HUISHOUDEN),
-    r"maandelijks spaargeld - (\w+)": ("Sparen - {c}", ExpenseCategory.NAAR_SPAARPOTJES),
-    r"ovpay": ("{c} OV kosten", ExpenseCategory.AUTO_VERVOER_OV),
-    r"vrij geld (\w+)": ("Vrij geld {c}", ExpenseCategory.PERSOONLIJK_VRIJ_GELD),
-    r"Bolhaar": ("{c} zorgkosten", ExpenseCategory.REKENINGEN),
-    r"(\w+) PROMOVENDUM": ("Promovendum {c}", ExpenseCategory.VERZEKERINGEN),
-    r"zorgkostennota":                      ("Zorgkosten terugbetaling", ExpenseCategory.ZORGVERZEKERING),
+    r"maandelijks spaargeld - (\w+)":  ("Sparen - {c}", ExpenseCategory.NAAR_SPAARPOTJES),
+    r"vrij geld (\w+)":                ("Vrij geld {c}", ExpenseCategory.PERSOONLIJK_VRIJ_GELD),
+    r"Bolhaar":                        ("{c} zorgkosten", ExpenseCategory.REKENINGEN),
+    r"Huiskamer":                      ("{c} snackje", ExpenseCategory.SNACKEN),
+    r"(\w+) PROMOVENDUM":              ("Promovendum {c}", ExpenseCategory.VERZEKERINGEN),
+    r"zorgkostennota":                 ("Zorgkosten terugbetaling", ExpenseCategory.ZORGVERZEKERING),
     r"zilveren kruis|de christelijke zorg": ("{c} zorgverzekering",      ExpenseCategory.ZORGVERZEKERING),
 }
 
@@ -117,24 +116,3 @@ GSHEET_NAME = "Test Automation Sheet" # The exact name of your Google Sheet
 GSHEET_TAB = "Blad1" # The worksheet/tab name inside that sheet
 
 # ─────────────────────────────────────────────────────────────────────────────
-# - API AND ASPSP CONFIGURATION
-#    Adjust these constants to match your API and ASPSP setup.
-# ─────────────────────────────────────────────────────────────────────────────
-
-API_ORIGIN = "https://api.enablebanking.com"
-ASPSP_NAME = "Mock ASPSP"
-ASPSP_COUNTRY = "NL"
-
-DDK_SESSION = {
-  "session_id": "4638f4f2-8c96-44ff-9b19-cf68a911a3ff",
-  "accounts": [
-    {"uid": "378e7021-64a4-495e-9a1d-8ca3119f73ea"}
-  ]
-}
-
-NL_SESSION = {
-  "session_id": "38764298-e4a0-4469-b5d2-64506da2cdc1",
-  "accounts": [
-    {"uid": "e12452f0-2f45-4319-a709-fb35a017eb01"}
-  ]
-}
