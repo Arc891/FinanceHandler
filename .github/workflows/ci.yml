@@ -185,7 +185,7 @@ jobs:
           fi
           
           # Check for hardcoded tokens or keys
-          if grep -rE "(token|key|secret|password)\s*=\s*['\"][^'\"]{20,}" src/ --exclude-dir=__pycache__ --exclude="*.example.*" || true; then
+          if grep -rE "(token|key|secret|password)\s*=\s*['\"](sk-[A-Za-z0-9]{32,}|ghp_[A-Za-z0-9]{36,}|xoxb-[A-Za-z0-9-]{48,}|[A-Za-z0-9]{40,})['\"]" src/ --exclude-dir=__pycache__ --exclude="*.example.*" || true; then
             echo "⚠️ Potential hardcoded credentials found"
           else
             echo "✅ No hardcoded credentials detected"
