@@ -21,8 +21,9 @@ COPY src/ ./src/
 # Create data directories
 RUN mkdir -p data/sessions data/uploads
 
-# Set Python path
+# Set Python path and ensure unbuffered output
 ENV PYTHONPATH="/app/src"
+ENV PYTHONUNBUFFERED=1
 
 # Create a non-root user for security
 RUN useradd --create-home --shell /bin/bash appuser && \
@@ -31,5 +32,7 @@ USER appuser
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-  CMD python -c "import discord; print('OK')" || exit 1# Run the bot
+  CMD python -c "import discord; print('OK')" || exit 1
+
+# Run the bot with unbuffered output
 CMD ["python", "src/bot.py"]

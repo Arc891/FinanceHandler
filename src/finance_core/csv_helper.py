@@ -1,6 +1,9 @@
 import csv
+import logging
 from typing import Dict, List, Any
 from config.spaarpot_uuid_map import SPAARPOT_UUID_MAP
+
+logger = logging.getLogger(__name__)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Helper: Load transactions from a fixed‐column CSV export
@@ -120,13 +123,13 @@ def normalize_csv_data(csv_path: str) -> None:
       if f"Referentie: {uuid}" in row[17]:
         # Row contains a UUID reference, change it to the mapped name
         name = SPAARPOT_UUID_MAP[uuid]
-        print(f"Changing row {row} with {uuid} to {name}")
+        logger.info(f"Changing row {row} with {uuid} to {name}")
         row[17] = row[17].replace(f"Referentie: {uuid}", f"- {name}")
-        print(f"Updated row: {row}")
+        logger.info(f"Updated row: {row}")
         break
          
     if str(row).find("verzekeri ") != -1:
-      print(f"Changing row {row} with 'verzekeri' to 'verzekering'")
+      logger.info(f"Changing row {row} with 'verzekeri' to 'verzekering'")
       row[17] = row[17].replace("verzekeri", "verzekering")
   
   # Write the modified rows back to the CSV file
@@ -134,4 +137,4 @@ def normalize_csv_data(csv_path: str) -> None:
     writer = csv.writer(csvfile)
     writer.writerows(rows)
   
-  print(f"CSV data normalized and saved to {csv_path}")
+  logger.info(f"CSV data normalized and saved to {csv_path}")

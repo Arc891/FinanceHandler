@@ -293,4 +293,4 @@ class ExportConfirmView(discord.ui.View):
 async def setup(bot):
     """Required function for loading the cog"""
     await bot.add_cog(FinanceBot(bot))
-    print("✅ FinanceBot cog loaded successfully")
+    logger.info("✅ FinanceBot cog loaded")

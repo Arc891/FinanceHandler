@@ -1,6 +1,6 @@
 {
   "name": "finance-automation-bot",
-  "version": "1.1.1",
+  "version": "1.2.0",
   "description": "Discord bot for automated finance tracking and transaction categorization",
   "main": "src/bot.py",
   "scripts": {
