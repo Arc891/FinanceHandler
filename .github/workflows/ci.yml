@@ -156,6 +156,10 @@ jobs:
 
       - name: Setup configuration for security tests
         run: |
+          # Create necessary directories
+          mkdir -p data/sessions
+          mkdir -p data/uploads
+          # Setup configuration
           cp src/config_settings.example.py src/config_settings.py
           echo "✅ Configuration file created from template for security tests"
 
