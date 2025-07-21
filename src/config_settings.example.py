@@ -21,7 +21,7 @@ MENTION_USER_IDS: List[int] = [
 
 # Google Sheets Configuration
 GOOGLE_SHEETS_ENABLED = os.getenv("GOOGLE_SHEETS_ENABLED", "true").lower() == "true"
-GOOGLE_CREDENTIALS_PATH = os.getenv("GOOGLE_CREDENTIALS_PATH", "config/google_service_account.json")
+GOOGLE_CREDENTIALS_PATH = os.getenv("GOOGLE_CREDENTIALS_PATH", "src/config/google_service_account.json")
 
 # File Upload Configuration
 UPLOAD_DIR = "data/uploads"
@@ -33,8 +33,9 @@ SESSION_DIR = "data/sessions"
 # Create absolute paths relative to project root
 _project_root = os.path.dirname(os.path.dirname(__file__))
 _upload_path = os.path.join(_project_root, UPLOAD_DIR)
+_config_path = os.path.join(os.path.dirname(__file__), "config")
 os.makedirs(_upload_path, exist_ok=True)
-os.makedirs("config", exist_ok=True)
+os.makedirs(_config_path, exist_ok=True)
 
 # Export all config variables
 __all__ = [

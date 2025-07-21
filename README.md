@@ -100,7 +100,7 @@ DAILY_REMINDER_TIME=09:00
 
 # Google Sheets Configuration (optional)
 GOOGLE_SHEETS_ENABLED=true
-GOOGLE_CREDENTIALS_PATH=config/google_service_account.json
+GOOGLE_CREDENTIALS_PATH=src/config/google_service_account.json
 ```
 
 ### User Mentions

@@ -69,9 +69,9 @@ fi
 
 # Create necessary directories
 echo "📁 Creating directories..."
-mkdir -p src/data/uploads
-mkdir -p src/sessions
-mkdir -p uploads
+mkdir -p data/uploads
+mkdir -p data/sessions
+mkdir -p src/config
 
 echo ""
 echo "🎉 Setup complete!"
