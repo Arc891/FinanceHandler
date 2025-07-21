@@ -51,26 +51,13 @@ logging.getLogger('discord.http').setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
 
-# Get system timezone
-import subprocess
+# Get timezone from environment variable (Docker best practice)
+SYSTEM_TIMEZONE: str = os.environ.get('TZ', 'UTC')
 
-# Initialize with default
-SYSTEM_TIMEZONE: str = 'UTC'
-
-try:
-    # Priority 1: TZ environment variable
-    tz_env = os.environ.get('TZ')
-    if tz_env:
-        SYSTEM_TIMEZONE = tz_env
-    else:
-        # Priority 2: Get timezone from system
-        result = subprocess.run(['timedatectl', 'show', '--property=Timezone', '--value'], 
-                              capture_output=True, text=True, timeout=5)
-        if result.returncode == 0 and result.stdout.strip():
-            SYSTEM_TIMEZONE = result.stdout.strip()
-except Exception as e:
-    # Final fallback - keep the default UTC
-    logger.warning(f"⚠️ Timezone detection failed, using UTC: {e}")
+if SYSTEM_TIMEZONE != 'UTC':
+    logger.info(f"✅ Using timezone from TZ environment variable: {SYSTEM_TIMEZONE}")
+else:
+    logger.info("🌍 No TZ environment variable set, using UTC")
 
 logger.info("🚀 Starting Discord Finance Bot...")
 logger.info(f"⏰ Daily reminder: {DAILY_REMINDER_TIME} ({SYSTEM_TIMEZONE})")

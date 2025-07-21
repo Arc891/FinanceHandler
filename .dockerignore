@@ -42,8 +42,8 @@ Thumbs.db
 # Logs
 *.log
 
-# Environment files
-.env
+# Environment files (keeping .env for container access)
+# .env is needed for runtime configuration
 .env.local
 
 # Session data (will be mounted as volume)
