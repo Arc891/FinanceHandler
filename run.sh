@@ -4,6 +4,11 @@ set -e
 # Finance Automation Bot - Docker Deployment Script
 # This script builds and deploys the Discord Finance Bot using the docker-build-push.sh utility
 
+ADDITIONAL_FLAGS=""
+for arg in "$@"; do
+  ADDITIONAL_FLAGS+=" $arg"
+done
+
 SCRIPT_DIR="$HOME/.scripts"
 DOCKER_SCRIPT="$SCRIPT_DIR/docker-build-push.sh"
 
@@ -32,8 +37,8 @@ if [[ ! -f "src/config_settings.py" ]]; then
     exit 1
 fi
 
-if [[ ! -f "config/google_service_account.json" ]]; then
-    echo "⚠️  Warning: Google service account not found at config/google_service_account.json"
+if [[ ! -f "src/config/google_service_account.json" ]]; then
+    echo "⚠️  Warning: Google service account not found at src/config/google_service_account.json"
     echo "Google Sheets integration will not work without this file"
 fi
 
@@ -86,6 +91,7 @@ echo "🔨 Building and deploying finance-automation-bot..."
 
 # Run the docker build and push script
 "$DOCKER_SCRIPT" \
+    $ADDITIONAL_FLAGS \
     --image "finance-automation-bot" \
     --port "8080" \
     --registry "registry.arc8.dev" \
