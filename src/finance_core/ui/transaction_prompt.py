@@ -5,7 +5,10 @@ from discord.ui import View, Button, Select, Modal, TextInput
 from typing import List, Dict, Any, Tuple, Optional
 import re
 import asyncio
+import logging
 from finance_core.session_management import load_session, save_session, clear_session
+
+logger = logging.getLogger(__name__)
 
 # Import the proper categories from constants
 try:
@@ -271,6 +274,15 @@ class TransactionView(View):
             expenses.append(categorized_tx)
 
         save_session(self.user_id, remaining, income, expenses)
+        
+        # Queue transaction for immediate upload to Google Sheets
+        try:
+            from finance_core.background_upload import queue_transaction_upload
+            queue_transaction_upload(categorized_tx, self.transaction_type, self.user_id)
+            upload_indicator = " 📤"
+        except Exception as e:
+            logger.error(f"❌ Failed to queue transaction for upload: {e}")
+            upload_indicator = ""
 
         # Disable all buttons and selects to prevent further interactions
         self.switch_type_button.disabled = True
@@ -288,13 +300,13 @@ class TransactionView(View):
         
         if remaining:
             await interaction.response.send_message(
-                content=f"✅ Categorized as {self.selected_category}{description_source}{smart_indicator} {progress_info}", 
+                content=f"✅ Categorized as {self.selected_category}{description_source}{smart_indicator}{upload_indicator} {progress_info}", 
                 ephemeral=True
             )
             await start_transaction_prompt(interaction, self.user_id)
         else:
             await interaction.response.send_message(
-                content=f"🎉 All {len(income) + len(expenses)} transactions processed!", 
+                content=f"🎉 All {len(income) + len(expenses)} transactions processed{upload_indicator}!", 
                 ephemeral=True
             )
             clear_session(self.user_id)

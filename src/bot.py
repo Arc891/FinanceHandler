@@ -78,6 +78,14 @@ logger.info("✅ Bot instance created")
 async def on_ready():
     logger.info(f"🤖 {bot.user} connected to Discord ({len(bot.guilds)} guilds)")
     
+    # Start Google Sheets upload queue
+    try:
+        from finance_core.background_upload import start_upload_queue
+        start_upload_queue()
+        logger.info("✅ Google Sheets upload queue started")
+    except Exception as e:
+        logger.error(f"❌ Failed to start upload queue: {e}")
+    
     # Load the finance commands cog
     try:
         await bot.load_extension("bot_commands")
