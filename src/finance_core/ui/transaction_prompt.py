@@ -4,6 +4,7 @@ import discord
 from discord.ui import View, Button, Select, Modal, TextInput
 from typing import List, Dict, Any, Tuple, Optional
 import re
+import asyncio
 from finance_core.session_management import load_session, save_session, clear_session
 
 # Import the proper categories from constants
@@ -96,7 +97,6 @@ class DescriptionModal(Modal):
         await self.transaction_view.complete_transaction(interaction, custom_desc)
     
     async def _delete_after_delay(self, interaction: discord.Interaction, delay: int):
-        import asyncio
         await asyncio.sleep(delay)
         try:
             await interaction.delete_original_response()
@@ -143,6 +143,10 @@ class TransactionView(View):
         self.confirm_button.callback = self.confirm_transaction
         self.add_item(self.confirm_button)
 
+        self.skip_button = Button(label="Skip Transaction", style=discord.ButtonStyle.secondary)
+        self.skip_button.callback = self.skip_transaction
+        self.add_item(self.skip_button)
+
     def _extract_suggested_description(self, transaction: Dict[str, Any]) -> str:
         """Extract a suggested description from transaction data"""
         description_parts = []
@@ -179,6 +183,7 @@ class TransactionView(View):
         self.switch_type_button.disabled = True
         self.category_select.disabled = True
         self.confirm_button.disabled = True
+        self.skip_button.disabled = True
 
     async def switch_type(self, interaction: discord.Interaction):
         self.transaction_type = "expense" if self.transaction_type == "income" else "income"
@@ -222,7 +227,6 @@ class TransactionView(View):
         if not self.selected_category:
             await interaction.response.send_message("⚠️ Please select a category first.", ephemeral=True)
             # Auto-delete after 3 seconds
-            import asyncio
             asyncio.create_task(self._delete_response_after_delay(interaction, 3))
             return
 
@@ -240,7 +244,6 @@ class TransactionView(View):
         remaining, income, expenses = load_session(self.user_id)
         if not remaining:
             await interaction.response.send_message("❌ No transactions remaining.", ephemeral=True)
-            import asyncio
             asyncio.create_task(self._delete_response_after_delay(interaction, 3))
             return
 
@@ -273,6 +276,7 @@ class TransactionView(View):
         self.switch_type_button.disabled = True
         self.category_select.disabled = True
         self.confirm_button.disabled = True
+        self.skip_button.disabled = True
 
         # Send concise confirmation message
         progress_info = f"({len(income) + len(expenses)}/{len(remaining) + len(income) + len(expenses)} done)"
@@ -296,11 +300,46 @@ class TransactionView(View):
             clear_session(self.user_id)
             
             # Auto-delete completion message after 5 seconds
-            import asyncio
+            asyncio.create_task(self._delete_response_after_delay(interaction, 5))
+
+    async def skip_transaction(self, interaction: discord.Interaction):
+        """Skip the current transaction and move to the next one"""
+        remaining, income, expenses = load_session(self.user_id)
+        if not remaining:
+            await interaction.response.send_message("❌ No transactions remaining.", ephemeral=True)
+            asyncio.create_task(self._delete_response_after_delay(interaction, 3))
+            return
+
+        # Remove the current transaction from remaining (skip it)
+        tx = remaining.pop(0)
+        save_session(self.user_id, remaining, income, expenses)
+
+        # Disable all buttons and selects to prevent further interactions
+        self.switch_type_button.disabled = True
+        self.category_select.disabled = True
+        self.confirm_button.disabled = True
+        self.skip_button.disabled = True
+
+        # Send confirmation message
+        progress_info = f"({len(income) + len(expenses)}/{len(remaining) + len(income) + len(expenses)} done, 1 skipped)"
+        
+        if remaining:
+            await interaction.response.send_message(
+                content=f"⏭️ Transaction skipped {progress_info}", 
+                ephemeral=True
+            )
+            await start_transaction_prompt(interaction, self.user_id)
+        else:
+            await interaction.response.send_message(
+                content=f"🎉 All transactions processed! {len(income) + len(expenses)} categorized, 1 skipped.", 
+                ephemeral=True
+            )
+            clear_session(self.user_id)
+            
+            # Auto-delete completion message after 5 seconds
             asyncio.create_task(self._delete_response_after_delay(interaction, 5))
 
     async def _delete_response_after_delay(self, interaction: discord.Interaction, delay: int):
-        import asyncio
         await asyncio.sleep(delay)
         try:
             await interaction.delete_original_response()
@@ -355,7 +394,7 @@ async def start_transaction_prompt(interaction: discord.Interaction, user_id: in
         embed.add_field(name="🤖 Smart Suggestion", value=f"**{suggested_category}**\n{suggested_description}", inline=False)
 
     # Add workflow info
-    workflow_text = "1️⃣ Select category → 2️⃣ Click **Confirm & Add Description** → 3️⃣ Review/edit description"
+    workflow_text = "1️⃣ Select category → 2️⃣ Click **Confirm & Add Description** → 3️⃣ Review/edit description\n\n⏭️ Or click **Skip Transaction** if already processed manually"
     if suggested_category:
         workflow_text += "\n\n✨ *Category and description pre-filled based on transaction data*"
     
