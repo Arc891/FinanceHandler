@@ -150,7 +150,7 @@ class TransactionView(View):
         self.skip_button.callback = self.skip_transaction
         self.add_item(self.skip_button)
 
-        self.cache_button = Button(label="📦 Cache for Later", style=discord.ButtonStyle.secondary)
+        self.cache_button = Button(label="Cache for Later", style=discord.ButtonStyle.secondary)
         self.cache_button.callback = self.cache_transaction
         self.add_item(self.cache_button)
 

@@ -284,7 +284,7 @@ class GoogleSheetsUploadQueue:
         
         if time_since_last < self.min_request_interval:
             sleep_time = self.min_request_interval - time_since_last
-            logger.debug(f"⏱️ Rate limiting: sleeping {sleep_time:.1f}s")
+            logger.debug(f"⏰ Rate limiting: sleeping {sleep_time:.1f}s")
             await asyncio.sleep(sleep_time)
         
         self.last_request_time = time.time()

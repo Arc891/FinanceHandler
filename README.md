@@ -3,11 +3,11 @@
 ## Features
 
 - 🤖 **Modern Discord Bot** with slash commands
-- � **CSV Transaction Processing** from bank exports
-- 🏷️ **Interactive Categorization** with Discord UI
+- 📄 **CSV Transaction Processing** from bank exports
+- 🏷 **Interactive Categorization** with Discord UI
 - 💾 **Session Management** for resuming interrupted processes
 - ⏰ **Daily Reminders** for transaction processing
-- � **Auto-categorization** with customizable rules
+- 🎯 **Auto-categorization** with customizable rules
 
 ## Commands
 

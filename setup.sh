@@ -24,7 +24,7 @@ echo "🔄 Activating virtual environment..."
 source venv/bin/activate
 
 # Upgrade pip
-echo "⬆️ Upgrading pip..."
+echo "⬆ Upgrading pip..."
 pip install --upgrade pip
 
 # Install requirements
@@ -37,7 +37,7 @@ else
 fi
 
 # Copy configuration files if they don't exist
-echo "⚙️ Setting up configuration files..."
+echo "⚙ Setting up configuration files..."
 
 if [ ! -f ".env" ]; then
     if [ -f ".env.example" ]; then
