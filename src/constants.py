@@ -39,7 +39,7 @@ class ExpenseCategory(str, Enum):
     NOG_IN_TEDELEN          = ("! Nog in te delen !",     r"nog|!")
     VERZEKERINGEN           = ("Verzekeringen",           r"ve")
     ZORGVERZEKERING         = ("Zorgverzekering",         r"zo")
-    DUMMY_CACHED            = ("🔄 CACHED",                r"dummy|cache")
+    DUMMY_CACHED            = ("CACHED",               r"dummy|cache")
 
     DEFAULT                 = NOG_IN_TEDELEN
 
@@ -65,7 +65,7 @@ class IncomeCategory(str, Enum):
     GIFT                  = ("Gift",                  r"gi")
     PERSONLIJKE_REKENING  = ("Persoonlijke rekening", r"pe")
     GEMEENTE              = ("Gemeente",              r"ge")
-    DUMMY_CACHED            = ("🔄 CACHED",                r"dummy|cache")
+    DUMMY_CACHED          = ("CACHED",                r"dummy|cache")
 
     DEFAULT               = PERSONLIJKE_REKENING
 

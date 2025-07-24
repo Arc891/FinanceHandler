@@ -55,7 +55,7 @@ class CachedTransactionsView(View):
         # Update the original message to show processing started
         try:
             await interaction.edit_original_response(view=self)
-        except:
+        except Exception:
             pass  # Message might already be updated
         
         # Start the actual processing workflow
@@ -105,5 +105,5 @@ class CachedTransactionsView(View):
         await asyncio.sleep(delay)
         try:
             await message.delete()
-        except:
+        except Exception:
             pass  # Message might already be deleted

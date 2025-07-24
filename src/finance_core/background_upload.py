@@ -285,21 +285,21 @@ class GoogleSheetsUploadQueue:
         if time_since_last < self.min_request_interval:
             sleep_time = self.min_request_interval - time_since_last
             logger.debug(f"⏱️ Rate limiting: sleeping {sleep_time:.1f}s")
-            time.sleep(sleep_time)
+            await asyncio.sleep(sleep_time)
         
         self.last_request_time = time.time()
     
-    def _upload_worker(self):
+    async def _upload_worker(self):
         """Background worker that processes the upload queue"""
         logger.info("👷 Upload worker started")
         
         while self.is_running:
             try:
                 # Get next item from queue (wait up to 1 second)
-                upload = self.upload_queue.get(timeout=1.0)
+                upload = await asyncio.wait_for(self.upload_queue.get(), timeout=1.0)
                 
                 # Apply rate limiting
-                self._rate_limit()
+                await self._rate_limit()
                 
                 # Upload the transaction
                 self._upload_single_transaction(upload)
@@ -361,8 +361,13 @@ class GoogleSheetsUploadQueue:
             # If no reserved row, use current positions (only for non-replacements)
             if not target_row:
                 if upload.transaction.get('_is_replacement'):
-                    logger.error(f"🚨 CRITICAL: Replacement transaction {upload.transaction.get('cache_id')} has no reserved row!")
-                    logger.error(f"🚨 Debug info: {upload.transaction}")
+                    logger.error(
+                        "🚨 CRITICAL: Replacement transaction has no reserved row!",
+                        extra={
+                            "cache_id": upload.transaction.get("cache_id"),
+                            "transaction_details": upload.transaction,
+                        }
+                    )
                     return  # Abort replacement to prevent data corruption
                     
                 if upload.transaction_type == "expense":

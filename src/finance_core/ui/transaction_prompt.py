@@ -375,8 +375,8 @@ class TransactionView(View):
             # Update the original message to show completion
             try:
                 await interaction.edit_original_response(view=self)
-            except:
-                pass  # Message might already be updated
+            except Exception as e:
+                logger.warning(f"Failed to edit the original response: {e}")  # Message might already be updated
             await start_transaction_prompt(interaction, self.user_id)
         else:
             await interaction.response.send_message(
@@ -453,7 +453,7 @@ class TransactionView(View):
             # Update the original message to show completion
             try:
                 await interaction.edit_original_response(view=self)
-            except:
+            except Exception:
                 pass  # Message might already be updated
             await start_transaction_prompt(interaction, self.user_id)
         else:
@@ -464,7 +464,7 @@ class TransactionView(View):
             # Update the original message to show completion
             try:
                 await interaction.edit_original_response(view=self)
-            except:
+            except Exception:
                 pass  # Message might already be updated
             clear_session(self.user_id)
             
@@ -817,8 +817,8 @@ class CachedTransactionView(View):
                 # Update the original message to show completion
                 try:
                     await interaction.edit_original_response(view=self)
-                except:
-                    pass  # Message might already be updated
+                except Exception as e:
+                    logger.warning(f"Failed to edit the original response: {e}")
                 
                 # Continue with next cached transaction
                 next_cached = remaining_cached[0]
@@ -832,7 +832,7 @@ class CachedTransactionView(View):
                 # Update the original message to show completion
                 try:
                     await interaction.edit_original_response(view=self)
-                except:
+                except Exception:
                     pass  # Message might already be updated
                 
                 # Auto-delete completion message after 5 seconds
@@ -855,7 +855,7 @@ class CachedTransactionView(View):
         # Update the original message to show cancellation
         try:
             await interaction.edit_original_response(view=self)
-        except:
+        except Exception:
             pass  # Message might already be updated
         
         # Auto-delete after 3 seconds
@@ -865,7 +865,7 @@ class CachedTransactionView(View):
         await asyncio.sleep(delay)
         try:
             await interaction.delete_original_response()
-        except:
+        except Exception:
             pass  # Message might already be deleted
 
 
