@@ -277,7 +277,7 @@ class GoogleSheetsUploadQueue:
         self.queue_transaction(new_transaction_with_cache, transaction_type, user_id)
         logger.info(f"🔄 Queued replacement for cached transaction {cache_id} (reserved_row: {new_transaction.get('_reserved_row', 'N/A')})")
 
-    def _rate_limit(self):
+    async def _rate_limit(self):
         """Ensure we don't exceed rate limits"""
         current_time = time.time()
         time_since_last = current_time - self.last_request_time
@@ -502,7 +502,6 @@ def start_upload_queue():
 
 def stop_upload_queue():
     """Stop the global upload queue"""
-    global _upload_queue
     if _upload_queue:
         _upload_queue.stop()
 
