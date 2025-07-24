@@ -15,7 +15,7 @@
 - `/resume` - Resume a previously paused session
 - `/status` - Check your current processing progress
 - `/cancel` - Cancel and clear your current session
-- `/export` - Export categorized transactions to Google Sheets
+- `/cached` - View and process cached transactions
 
 ## Setup
 
@@ -194,7 +194,7 @@ python bot.py
 - `/status` - Check your current processing session status
 - `/resume` - Resume a previously paused session
 - `/cancel` - Cancel and clear your current session
-- `/export` - Export categorized transactions to Google Sheets
+- `/cached` - View and process cached transactions
 
 ### Daily Reminders
 
