@@ -4,7 +4,7 @@ import gspread
 import logging
 from typing import List, Dict, Any, Tuple, Optional
 from google.oauth2.service_account import Credentials
-from constants import GSHEET_NAME, GSHEET_TAB
+from config_settings import GSHEET_NAME, GSHEET_TAB
 import os
 
 logger = logging.getLogger(__name__)
@@ -44,12 +44,21 @@ class GoogleSheetsExporter:
             if self.client is None:
                 raise Exception("Failed to authorize Google Sheets client")
             try:
-                self.sheet = self.client.open(GSHEET_NAME).worksheet(GSHEET_TAB)
+                # First try to open the spreadsheet
+                spreadsheet = self.client.open(GSHEET_NAME)
+                logger.info(f"✅ Opened spreadsheet: {GSHEET_NAME}")
+                
+                # Then try to get the specific worksheet
+                self.sheet = spreadsheet.worksheet(GSHEET_TAB)
                 logger.info(f"✅ Opened worksheet: {GSHEET_NAME} - {GSHEET_TAB}")
+            
             except gspread.SpreadsheetNotFound:
-                raise Exception(f"Spreadsheet '{GSHEET_NAME}' not found. Please check the name in constants.py")
+                raise Exception(f"Spreadsheet '{GSHEET_NAME}' not found. Please check the name and permissions.")
             except gspread.WorksheetNotFound:
                 raise Exception(f"Worksheet '{GSHEET_TAB}' not found in '{GSHEET_NAME}'")
+            except Exception as e:
+                logger.error(f"❌ Unexpected error accessing sheet: {e}")
+                raise
         return self.sheet
     
     def format_transaction_for_sheet(self, transaction: Dict[str, Any]) -> List[str]:

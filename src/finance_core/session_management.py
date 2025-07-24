@@ -5,6 +5,7 @@ import json
 import uuid
 from typing import List, Dict, Any, Tuple, Optional
 from datetime import datetime
+from config_settings import GSHEET_EXPENSE_START_ROW, GSHEET_INCOME_START_ROW
 
 # Import session directory from config
 try:
@@ -38,8 +39,8 @@ def _load_full_session(user_id: int) -> Dict[str, Any]:
             "expenses": [],
             "cached": [],
             "sheet_positions": {
-                "expense_row": 2,
-                "income_row": 2,
+                "expense_row": GSHEET_EXPENSE_START_ROW,
+                "income_row": GSHEET_INCOME_START_ROW,
                 "last_updated": None
             }
         }
@@ -53,8 +54,8 @@ def _load_full_session(user_id: int) -> Dict[str, Any]:
             "expenses": data.get("expenses", []),
             "cached": data.get("cached", []),
             "sheet_positions": data.get("sheet_positions", {
-                "expense_row": 2,
-                "income_row": 2,
+                "expense_row": GSHEET_EXPENSE_START_ROW,
+                "income_row": GSHEET_INCOME_START_ROW,
                 "last_updated": None
             })
         }

@@ -22,6 +22,14 @@ MENTION_USER_IDS: List[int] = [
 # Google Sheets Configuration
 GOOGLE_SHEETS_ENABLED = os.getenv("GOOGLE_SHEETS_ENABLED", "true").lower() == "true"
 GOOGLE_CREDENTIALS_PATH = os.getenv("GOOGLE_CREDENTIALS_PATH", "src/config/google_service_account.json")
+GSHEET_NAME = os.getenv("GSHEET_NAME", "Test Automation Sheet").strip("\"'")
+GSHEET_TAB = os.getenv("GSHEET_TAB", "Blad1").strip("\"'")
+
+# Sheet Layout Configuration
+# These settings define which row the transaction data should start from
+# Adjust these based on your sheet structure (headers, instructions, etc.)
+GSHEET_EXPENSE_START_ROW = int(os.getenv("GSHEET_EXPENSE_START_ROW", "2"))  # Row for first expense transaction
+GSHEET_INCOME_START_ROW = int(os.getenv("GSHEET_INCOME_START_ROW", "2"))   # Row for first income transaction
 
 # File Upload Configuration
 UPLOAD_DIR = "data/uploads"
@@ -45,6 +53,10 @@ __all__ = [
     "MENTION_USER_IDS",
     "GOOGLE_SHEETS_ENABLED",
     "GOOGLE_CREDENTIALS_PATH",
+    "GSHEET_NAME",
+    "GSHEET_TAB",
+    "GSHEET_EXPENSE_START_ROW",
+    "GSHEET_INCOME_START_ROW",
     "UPLOAD_DIR",
     "SESSION_DIR"
 ]

@@ -21,7 +21,7 @@ class ExpenseCategory(str, Enum):
         obj.pattern = pattern
         return obj
 
-    ABBONEMENTEN            = ("Abbonementen",            r"ab")
+    ABONNEMENTEN            = ("Abonnementen",            r"ab")
     ANDER                   = ("Ander",                   r"an")
     AUTO_VERVOER_OV         = ("Auto / vervoer / OV",     r"au")
     BOODSCHAPPEN            = ("Boodschappen",            r"bo")
@@ -75,13 +75,13 @@ class IncomeCategory(str, Enum):
 # ─────────────────────────────────────────────────────────────────────────────
 
 CATEGORIZATION_RULES_EXPENSE = {
-    r"gebruik betaalrekening":         ("ASN Gebruikskosten", ExpenseCategory.ABBONEMENTEN),
-    r"maandelijkse bijdrage familie":  ("{c} uitjes",   ExpenseCategory.ABBONEMENTEN),
-    r"Apple opslag en app pomodoro":   ("{c} Janneke",  ExpenseCategory.ABBONEMENTEN),
-    r"Simpel|Vodafone":                ("{c} telefoon", ExpenseCategory.ABBONEMENTEN),
-    r"consumentenbond|ANWB":           ("{c}", ExpenseCategory.ABBONEMENTEN),
-    r"lensplaza":                      ("Lenzen Janneke",  ExpenseCategory.ABBONEMENTEN),
-    r"ODIDO":                          ("{c} Internet/TV", ExpenseCategory.ABBONEMENTEN),
+    r"gebruik betaalrekening":         ("ASN Gebruikskosten", ExpenseCategory.ABONNEMENTEN),
+    r"maandelijkse bijdrage familie":  ("{c} uitjes",   ExpenseCategory.ABONNEMENTEN),
+    r"Apple opslag en app pomodoro":   ("{c} Janneke",  ExpenseCategory.ABONNEMENTEN),
+    r"Simpel|Vodafone":                ("{c} telefoon", ExpenseCategory.ABONNEMENTEN),
+    r"consumentenbond|ANWB":           ("{c}", ExpenseCategory.ABONNEMENTEN),
+    r"lensplaza":                      ("Lenzen Janneke",  ExpenseCategory.ABONNEMENTEN),
+    r"ODIDO":                          ("{c} Internet/TV", ExpenseCategory.ABONNEMENTEN),
     r"Kuario":                         ("Printen Bieb Driebergen", ExpenseCategory.ANDER),
     r"TinQ|Tango":                     ("{c} tanken", ExpenseCategory.AUTO_VERVOER_OV),
     r"Greenwheels":                    ("{c} auto",   ExpenseCategory.AUTO_VERVOER_OV),
@@ -108,13 +108,3 @@ CATEGORIZATION_RULES_INCOME = {
     r"BONUS":                ("{c} bonus",     IncomeCategory.BONUS),
     r"GEMEENTE":             ("{c} uitkering", IncomeCategory.GEMEENTE),
 }
-
-# ─────────────────────────────────────────────────────────────────────────────
-# - GOOGLE SHEET CONFIGURATION
-#    Adjust these constants to match your Google Sheet setup.
-# ─────────────────────────────────────────────────────────────────────────────
-
-GSHEET_NAME = "Test Automation Sheet" # The exact name of your Google Sheet
-GSHEET_TAB = "Blad1" # The worksheet/tab name inside that sheet
-
-# ─────────────────────────────────────────────────────────────────────────────

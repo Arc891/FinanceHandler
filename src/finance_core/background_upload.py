@@ -53,9 +53,19 @@ class GoogleSheetsUploadQueue:
         self.thread: Optional[threading.Thread] = None
         self.exporter: Optional[GoogleSheetsExporter] = None
         
+        # Load configurable starting rows
+        try:
+            from config_settings import GSHEET_EXPENSE_START_ROW, GSHEET_INCOME_START_ROW
+            self.default_expense_start_row = GSHEET_EXPENSE_START_ROW
+            self.default_income_start_row = GSHEET_INCOME_START_ROW
+        except ImportError:
+            # Fallback to safe defaults if config not available
+            self.default_expense_start_row = 2
+            self.default_income_start_row = 2
+        
         # Track row positions - will be loaded per user when needed
-        self.current_expense_row = 2  # Default fallback
-        self.current_income_row = 2
+        self.current_expense_row = self.default_expense_start_row  # Use configurable default
+        self.current_income_row = self.default_income_start_row
         self.current_user_id = None  # Track which user's positions we have loaded
         
         # Rate limiting
@@ -68,8 +78,15 @@ class GoogleSheetsUploadQueue:
         
         try:
             positions = get_sheet_positions(user_id)
-            self.current_expense_row = positions.get('expense_row', 2)
-            self.current_income_row = positions.get('income_row', 2)
+            self.current_expense_row = positions.get('expense_row', self.default_expense_start_row)
+            self.current_income_row = positions.get('income_row', self.default_income_start_row)
+            
+            # Handle None values that might be stored in the session
+            if self.current_expense_row is None:
+                self.current_expense_row = self.default_expense_start_row
+            if self.current_income_row is None:
+                self.current_income_row = self.default_income_start_row
+                
             self.current_user_id = user_id
             logger.info(f"📍 Loaded row positions for user {user_id}: expenses={self.current_expense_row}, income={self.current_income_row}")
             
@@ -79,7 +96,8 @@ class GoogleSheetsUploadQueue:
             else:
                 # If cached positions are very high (>10), verify the sheet actually has that much data
                 # This prevents using stale positions when the sheet was cleared
-                if self.current_expense_row > 10 or self.current_income_row > 10:
+                # Only do this check if we have valid numeric values
+                if (self.current_expense_row and self.current_expense_row > 10) or (self.current_income_row and self.current_income_row > 10):
                     logger.info(f"🔍 Cached positions seem high (exp:{self.current_expense_row}, inc:{self.current_income_row}), verifying with sheet...")
                     
                     # Quick check to see if sheet actually has data at those positions
@@ -112,7 +130,6 @@ class GoogleSheetsUploadQueue:
         except Exception as e:
             logger.error(f"❌ Error loading row positions: {e}")
             self._detect_current_positions(user_id)
-            self._detect_current_positions(user_id)
     
     def _save_row_positions(self, user_id: int):
         """Save current row positions for a specific user"""
@@ -134,19 +151,17 @@ class GoogleSheetsUploadQueue:
             
             logger.info(f"🔍 Detecting row positions in Google Sheet for user {user_id}...")
             
-            # Find last non-empty row in expense columns (B-E) - using a more robust method
-            expense_values = sheet.get('B:E')
-            logger.debug(f"🔍 Retrieved {len(expense_values) if expense_values else 0} rows from expense columns (B:E)")
-            self.current_expense_row = self._find_last_data_row(expense_values)
+            # Get expense columns (B:E)
+            expense_values = sheet.get('B1:E200')
+            self.current_expense_row = self._find_last_data_row(expense_values, "expense")
             
-            # Find last non-empty row in income columns (G-J)  
-            income_values = sheet.get('G:J')
-            logger.debug(f"🔍 Retrieved {len(income_values) if income_values else 0} rows from income columns (G:J)")
-            self.current_income_row = self._find_last_data_row(income_values)
+            # Get income columns (G:J)  
+            income_values = sheet.get('G1:J200')
+            self.current_income_row = self._find_last_data_row(income_values, "income")
             
-            # Ensure we start at least at row 2
-            self.current_expense_row = max(self.current_expense_row, 2)
-            self.current_income_row = max(self.current_income_row, 2)
+            # Ensure we start at least at the configured starting rows
+            self.current_expense_row = max(self.current_expense_row, self.default_expense_start_row)
+            self.current_income_row = max(self.current_income_row, self.default_income_start_row)
             
             logger.info(f"🔍 Detected row positions for user {user_id}: expenses={self.current_expense_row}, income={self.current_income_row}")
             self._save_row_positions(user_id)
@@ -154,36 +169,38 @@ class GoogleSheetsUploadQueue:
         except Exception as e:
             logger.error(f"❌ Error detecting row positions: {e}")
             # Fallback to safe defaults
-            self.current_expense_row = 2
-            self.current_income_row = 2
+            self.current_expense_row = self.default_expense_start_row
+            self.current_income_row = self.default_income_start_row
     
-    def _find_last_data_row(self, values):
-        """Find the last row that contains actual data (more robust method)"""
+    def _find_last_data_row(self, values, column_type="expense"):
+        """Find the last row that contains actual data
+        
+        Args:
+            values: Sheet values to analyze
+            column_type: "expense" or "income" to determine minimum starting row
+        """
         if not values:
-            logger.debug("🔍 No values found, returning row 1")
-            return 1  # Start at row 2 (1 + 1)
+            min_start_row = self.default_expense_start_row if column_type == "expense" else self.default_income_start_row
+            return min_start_row
+        
+        # Determine minimum starting row based on configuration
+        min_start_row = self.default_expense_start_row if column_type == "expense" else self.default_income_start_row
         
         last_data_row = 0
         for i, row in enumerate(values):
             # Check if any cell in this row has non-empty, non-whitespace content
             has_data = False
-            row_content = []
             for cell in row:
                 cell_str = str(cell).strip() if cell else ""
-                row_content.append(f"'{cell_str}'")
                 if cell_str:
                     has_data = True
-            
-            # Debug log for each row being checked (only for first 20 rows to avoid spam)
-            if i < 20:
-                logger.debug(f"🔍 Row {i+1}: {row_content} - Has data: {has_data}")
+                    break
             
             if has_data:
                 last_data_row = i + 1  # Convert to 1-based row number
         
-        # Return the next available row (last data row + 1)
-        next_row = last_data_row + 1
-        logger.info(f"🔍 Analysis complete: Last data row: {last_data_row}, next available row: {next_row}")
+        # Return the next available row (last data row + 1), but ensure it's at least the configured starting row
+        next_row = max(last_data_row + 1, min_start_row)
         return next_row
     
     def start(self):
@@ -310,6 +327,7 @@ class GoogleSheetsUploadQueue:
             if not self.exporter:
                 self.exporter = GoogleSheetsExporter(self.credentials_path)
             
+            # Try to get the worksheet
             sheet = self.exporter._get_worksheet()
             
             # Format transaction for sheet
@@ -374,21 +392,18 @@ class GoogleSheetsUploadQueue:
                             logger.error(f"🚨 This would overwrite existing data! Recalculating row position.")
                             
                             # Re-detect the actual next empty row from scratch
-                            logger.info(f"🔄 Re-detecting row positions to find safe upload location...")
                             if upload.transaction_type == "expense":
-                                expense_values = sheet.get('B:E')
-                                corrected_row = self._find_last_data_row(expense_values)
+                                expense_values = sheet.get('B1:E200')
+                                corrected_row = self._find_last_data_row(expense_values, "expense")
                                 self.current_expense_row = corrected_row
                                 target_row = corrected_row
                                 target_range = f"B{target_row}:E{target_row}"
-                                logger.info(f"✅ Corrected expense row to {target_row}")
                             else:
-                                income_values = sheet.get('G:J')
-                                corrected_row = self._find_last_data_row(income_values)
+                                income_values = sheet.get('G1:J200')
+                                corrected_row = self._find_last_data_row(income_values, "income")
                                 self.current_income_row = corrected_row
                                 target_row = corrected_row
                                 target_range = f"G{target_row}:J{target_row}"
-                                logger.info(f"✅ Corrected income row to {target_row}")
                             
                             # Double-check the corrected row is actually empty
                             check_range = target_range
@@ -396,22 +411,17 @@ class GoogleSheetsUploadQueue:
                             if double_check and double_check[0]:
                                 double_check_content = any(str(cell).strip() for cell in double_check[0] if cell)
                                 if double_check_content:
-                                    logger.error(f"🚨 CRITICAL ERROR: Even corrected row {target_row} has data: {double_check[0]}")
-                                    logger.error(f"🚨 Cannot safely upload transaction. Skipping to prevent data loss.")
+                                    logger.error(f"🚨 Cannot safely upload - even corrected row {target_row} has data")
                                     return  # Abort upload to prevent overwriting
-                            
-                            logger.info(f"✅ Double-checked: Row {target_row} is safe for upload")
                 except Exception as e:
                     logger.warning(f"⚠️ Could not verify target row emptiness: {e}")
-                    logger.warning(f"⚠️ Proceeding with upload but this may overwrite data!")
-            else:
-                if upload.transaction.get('_is_replacement'):
-                    logger.info(f"🔄 Replacement transaction - skipping safety check for row {target_row}")
-                else:
-                    logger.info(f"🎯 Using pre-reserved row {target_row} - skipping safety check")
             
             # Upload to sheet
-            sheet.update([formatted_data], target_range)
+            try:
+                sheet.update([formatted_data], target_range)
+            except Exception as e:
+                logger.error(f"❌ Failed to upload to range {target_range}: {e}")
+                raise
             
             # Handle cached transaction logic
             if 'cache_id' in upload.transaction:
@@ -453,8 +463,8 @@ class GoogleSheetsUploadQueue:
         logger.warning(f"🔄 Forcing complete reset of row positions for user {user_id}...")
         
         # Clear cached positions
-        self.current_expense_row = 2
-        self.current_income_row = 2
+        self.current_expense_row = self.default_expense_start_row
+        self.current_income_row = self.default_income_start_row
         self.current_user_id = None
         
         # Force re-detection
