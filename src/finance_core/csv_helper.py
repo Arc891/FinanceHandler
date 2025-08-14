@@ -134,7 +134,7 @@ def normalize_csv_data(csv_path: str) -> None:
   
   # Write the modified rows back to the CSV file
   with open(csv_path, 'w', newline='', encoding='utf-8') as csvfile:
-    writer = csv.writer(csvfile)
+    writer = csv.writer(csvfile, quoting=csv.QUOTE_MINIMAL)
     writer.writerows(rows)
   
   logger.info(f"CSV data normalized and saved to {csv_path}")

@@ -3,7 +3,6 @@ Background Google Sheets upload queue with throttling.
 Handles immediate transaction uploads with proper rate limiting.
 """
 
-import asyncio
 import logging
 from typing import Dict, Any, Optional, Tuple
 from dataclasses import dataclass
@@ -277,7 +276,7 @@ class GoogleSheetsUploadQueue:
         self.queue_transaction(new_transaction_with_cache, transaction_type, user_id)
         logger.info(f"🔄 Queued replacement for cached transaction {cache_id} (reserved_row: {new_transaction.get('_reserved_row', 'N/A')})")
 
-    async def _rate_limit(self):
+    def _rate_limit(self):
         """Ensure we don't exceed rate limits"""
         current_time = time.time()
         time_since_last = current_time - self.last_request_time
@@ -285,21 +284,21 @@ class GoogleSheetsUploadQueue:
         if time_since_last < self.min_request_interval:
             sleep_time = self.min_request_interval - time_since_last
             logger.debug(f"⏰ Rate limiting: sleeping {sleep_time:.1f}s")
-            await asyncio.sleep(sleep_time)
+            time.sleep(sleep_time)
         
         self.last_request_time = time.time()
     
-    async def _upload_worker(self):
+    def _upload_worker(self):
         """Background worker that processes the upload queue"""
         logger.info("👷 Upload worker started")
         
         while self.is_running:
             try:
                 # Get next item from queue (wait up to 1 second)
-                upload = await asyncio.wait_for(self.upload_queue.get(), timeout=1.0)
+                upload = self.upload_queue.get(timeout=1.0)
                 
                 # Apply rate limiting
-                await self._rate_limit()
+                self._rate_limit()
                 
                 # Upload the transaction
                 self._upload_single_transaction(upload)

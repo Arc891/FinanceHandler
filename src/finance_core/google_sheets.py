@@ -61,7 +61,7 @@ class GoogleSheetsExporter:
                 raise
         return self.sheet
     
-    def format_transaction_for_sheet(self, transaction: Dict[str, Any]) -> List[str]:
+    def format_transaction_for_sheet(self, transaction: Dict[str, Any]) -> List[Any]:
         """
         Format a single transaction for Google Sheets export.
         
@@ -70,6 +70,7 @@ class GoogleSheetsExporter:
             
         Returns:
             List of values: [date, amount, description, category]
+            Note: amount is returned as float for proper Google Sheets formatting
         """
         # Extract date
         date_str = transaction.get("booking_date", "")
@@ -79,10 +80,11 @@ class GoogleSheetsExporter:
         amount_str = amount_data.get("amount", "0")
         try:
             amount = float(amount_str)
-            # Format as positive value with comma as decimal separator (European style)
-            amount_formatted = f"{abs(amount):.2f}".replace('.', ',')
+            # Return as numeric value for Google Sheets (not string)
+            # Google Sheets will handle the formatting based on cell format
+            amount_value = abs(amount)
         except ValueError:
-            amount_formatted = "0,00"
+            amount_value = 0.0
         
         # Extract description from multiple sources
         description_parts = []
@@ -114,7 +116,7 @@ class GoogleSheetsExporter:
         # Get category (should have been added during categorization)
         category = transaction.get("category", "Uncategorized")
         
-        return [date_str, amount_formatted, description, category]
+        return [date_str, amount_value, description, category]
     
     def write_transactions_to_sheet(
         self, 
