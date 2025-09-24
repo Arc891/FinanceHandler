@@ -375,6 +375,16 @@ class GoogleSheetsUploadQueue:
                     target_row = self.current_income_row
                 logger.info(f"📍 Using current row {target_row} for {upload.transaction_type} transaction")
             
+            # CRITICAL: Check if the target row exceeds sheet bounds and expand if necessary
+            try:
+                if not self.exporter.check_row_bounds(target_row):
+                    logger.warning(f"⚠️ Target row {target_row} exceeds sheet bounds, expanding sheet...")
+                    self.exporter.ensure_sheet_capacity(target_row, buffer_rows=50)
+                    logger.info(f"✅ Sheet expanded to accommodate row {target_row}")
+            except Exception as e:
+                logger.error(f"❌ Failed to expand sheet for row {target_row}: {e}")
+                raise Exception(f"Cannot upload to row {target_row}: sheet expansion failed: {e}")
+            
             # Determine target range based on transaction type
             if upload.transaction_type == "expense":
                 target_range = f"B{target_row}:E{target_row}"
@@ -462,6 +472,81 @@ class GoogleSheetsUploadQueue:
             # Could implement retry logic here if needed
             raise
     
+    def retry_failed_transactions(self, user_id: int, transaction_type: Optional[str] = None):
+        """
+        Retry failed transactions from the user's session data.
+        
+        Args:
+            user_id: The user ID to retry transactions for
+            transaction_type: Optional filter for "expense" or "income", or None for both
+        """
+        try:
+            # Load session data to get categorized transactions that may have failed
+            from finance_core.session_management import load_session
+            remaining, income_transactions, expense_transactions = load_session(user_id)
+            
+            retry_count = 0
+            
+            # Retry expense transactions
+            if transaction_type in (None, "expense") and expense_transactions:
+                logger.info(f"🔄 Retrying {len(expense_transactions)} failed expense transactions for user {user_id}")
+                for transaction in expense_transactions:
+                    # Check if transaction already has necessary fields
+                    if not transaction.get("category"):
+                        logger.warning(f"⚠️ Skipping expense transaction without category: {transaction.get('booking_date', 'Unknown date')}")
+                        continue
+                    
+                    # Queue for background upload
+                    self.queue_transaction(transaction, "expense", user_id)
+                    retry_count += 1
+                    logger.debug(f"🔄 Queued failed expense transaction: {transaction.get('description', 'No description')[:50]}")
+            
+            # Retry income transactions  
+            if transaction_type in (None, "income") and income_transactions:
+                logger.info(f"🔄 Retrying {len(income_transactions)} failed income transactions for user {user_id}")
+                for transaction in income_transactions:
+                    # Check if transaction already has necessary fields
+                    if not transaction.get("category"):
+                        logger.warning(f"⚠️ Skipping income transaction without category: {transaction.get('booking_date', 'Unknown date')}")
+                        continue
+                    
+                    # Queue for background upload
+                    self.queue_transaction(transaction, "income", user_id)
+                    retry_count += 1
+                    logger.debug(f"🔄 Queued failed income transaction: {transaction.get('description', 'No description')[:50]}")
+            
+            if retry_count > 0:
+                logger.info(f"✅ Queued {retry_count} failed transactions for retry (user {user_id})")
+            else:
+                logger.info(f"ℹ️ No failed transactions found to retry for user {user_id}")
+                
+            return retry_count
+            
+        except Exception as e:
+            logger.error(f"❌ Error retrying failed transactions for user {user_id}: {e}")
+            raise
+
+    def clear_failed_transactions_after_retry(self, user_id: int):
+        """
+        Clear the categorized transactions from session after successful retry.
+        This should be called after confirming the retry uploads were successful.
+        """
+        try:
+            from finance_core.session_management import save_session, load_session
+            
+            # Load current session
+            remaining, income_transactions, expense_transactions = load_session(user_id)
+            
+            # Clear the categorized transactions but keep remaining uncategorized ones
+            save_session(user_id, remaining, [], [])
+            
+            cleared_count = len(income_transactions) + len(expense_transactions)
+            logger.info(f"🧹 Cleared {cleared_count} categorized transactions from session after retry (user {user_id})")
+            
+        except Exception as e:
+            logger.error(f"❌ Error clearing failed transactions after retry: {e}")
+            raise
+
     def reset_row_positions(self, user_id: int):
         """Force a complete reset and re-detection of row positions from the Google Sheet"""
         logger.warning(f"🔄 Forcing complete reset of row positions for user {user_id}...")
@@ -513,3 +598,25 @@ def queue_cached_replacement(cache_id: str, new_transaction: Dict[str, Any], tra
     """Queue a cached transaction replacement"""
     queue = get_upload_queue()
     queue.queue_cached_replacement(cache_id, new_transaction, transaction_type, user_id)
+
+def retry_failed_transactions(user_id: int, transaction_type: Optional[str] = None) -> int:
+    """
+    Retry failed transactions from the user's session data.
+    
+    Args:
+        user_id: The user ID to retry transactions for
+        transaction_type: Optional filter for "expense" or "income", or None for both
+        
+    Returns:
+        Number of transactions queued for retry
+    """
+    queue = get_upload_queue()
+    return queue.retry_failed_transactions(user_id, transaction_type)
+
+def clear_failed_transactions_after_retry(user_id: int):
+    """
+    Clear the categorized transactions from session after successful retry.
+    This should be called after confirming the retry uploads were successful.
+    """
+    queue = get_upload_queue()
+    queue.clear_failed_transactions_after_retry(user_id)

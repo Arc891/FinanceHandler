@@ -60,6 +60,58 @@ class GoogleSheetsExporter:
                 logger.error(f"❌ Unexpected error accessing sheet: {e}")
                 raise
         return self.sheet
+
+    def ensure_sheet_capacity(self, required_row: int, buffer_rows: int = 50) -> bool:
+        """
+        Ensure the sheet has enough rows to accommodate the required row.
+        Expands the sheet if necessary with a buffer for future transactions.
+        
+        Args:
+            required_row: The row number that needs to be available
+            buffer_rows: Additional rows to add beyond the required row for safety
+            
+        Returns:
+            True if sheet was expanded, False if no expansion was needed
+        """
+        try:
+            sheet = self._get_worksheet()
+            current_row_count = sheet.row_count
+            
+            if required_row <= current_row_count:
+                logger.debug(f"✅ Sheet has sufficient capacity: {current_row_count} rows, need row {required_row}")
+                return False
+            
+            # Calculate new row count with buffer
+            new_row_count = required_row + buffer_rows
+            
+            logger.info(f"📏 Expanding sheet from {current_row_count} to {new_row_count} rows (need row {required_row} + {buffer_rows} buffer)")
+            
+            # Resize the worksheet
+            sheet.resize(rows=new_row_count)
+            
+            logger.info(f"✅ Successfully expanded sheet to {new_row_count} rows")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to expand sheet: {e}")
+            raise Exception(f"Could not expand sheet to accommodate row {required_row}: {e}")
+
+    def check_row_bounds(self, target_row: int) -> bool:
+        """
+        Check if a target row is within the current sheet bounds.
+        
+        Args:
+            target_row: The row number to check
+            
+        Returns:
+            True if the row is within bounds, False otherwise
+        """
+        try:
+            sheet = self._get_worksheet()
+            return target_row <= sheet.row_count
+        except Exception as e:
+            logger.error(f"❌ Failed to check sheet bounds: {e}")
+            return False
     
     def format_transaction_for_sheet(self, transaction: Dict[str, Any]) -> List[Any]:
         """
