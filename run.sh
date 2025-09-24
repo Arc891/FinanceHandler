@@ -5,8 +5,17 @@ set -e
 # This script builds and deploys the Discord Finance Bot using the docker-build-push.sh utility
 
 ADDITIONAL_FLAGS=""
+FORCE_REBUILD=0
+
 for arg in "$@"; do
-  ADDITIONAL_FLAGS+=" $arg"
+  case $arg in
+    --force-rebuild)
+      FORCE_REBUILD=1
+      ;;
+    *)
+      ADDITIONAL_FLAGS+=" $arg"
+      ;;
+  esac
 done
 
 SCRIPT_DIR="$HOME/.scripts"
@@ -89,6 +98,14 @@ DOCKER_RUN_ARGS=(
 
 echo "🔨 Building and deploying finance-automation-bot..."
 
+# Clean up Docker cache if force rebuild is requested
+if [[ $FORCE_REBUILD -eq 1 ]]; then
+    echo "🧹 Force rebuild requested - cleaning Docker cache..."
+    docker system prune -f --volumes || true
+    docker builder prune -f || true
+    # ADDITIONAL_FLAGS+=" --upgrade-minor"  # Force version bump
+fi
+
 # Run the docker build and push script
 "$DOCKER_SCRIPT" \
     $ADDITIONAL_FLAGS \
@@ -107,5 +124,9 @@ echo "  Stop bot:     docker stop finance-automation-bot"
 echo "  Start bot:    docker start finance-automation-bot"
 echo "  Restart bot:  docker restart finance-automation-bot"
 echo ""
-echo "🔍 Bot status:"
+echo "� Troubleshooting:"
+echo "  Force rebuild: ./run.sh --force-rebuild"
+echo "  Test build:    ./run.sh --test"
+echo ""
+echo "�🔍 Bot status:"
 docker ps --filter "name=finance-automation-bot" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
