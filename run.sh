@@ -81,9 +81,6 @@ fi
 
 # Set up Docker run arguments for the bot
 DOCKER_RUN_ARGS=(
-    # Pass environment variables from .env file
-    --env-file ".env"
-    
     # Mount volumes for persistent data
     -v "$(pwd)/data:/app/data"
     -v "$(pwd)/config:/app/config"
