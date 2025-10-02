@@ -31,13 +31,11 @@ chmod +x setup.sh
 3. **Copy configuration**
 
    ```bash
-   cp .env.example .env
    cp src/config_settings.example.py src/config_settings.py
    ```
 
 4. **Configure your bot**
-   - Edit `.env` with your Discord token
-   - Edit `src/config_settings.py` with user IDs
+   - Edit `src/config_settings.py` with your Discord token and user IDs
 
 5. **Set up Google Sheets (Optional)**
    - Create a Google Cloud Platform project
@@ -45,7 +43,7 @@ chmod +x setup.sh
    - Create a service account and download the JSON key
    - Save the key as `src/config/google_service_account.json`
    - Share your Google Sheets with the service account email
-   - Configure `GOOGLE_SHEETS_ENABLED=true` in your `.env` file
+   - Configure Google Sheets settings in `src/config_settings.py`
 
 ## Project Structure
 
@@ -71,7 +69,6 @@ FinanceAutomation/
 │   ├── sessions/           # User session files
 │   └── uploads/            # Uploaded CSV files
 ├── requirements.txt        # Python dependencies
-├── .env.example           # Environment template
 ├── .gitignore             # Git ignore rules
 ├── setup.sh               # Development setup script
 ├── LICENSE                # MIT License
@@ -128,7 +125,7 @@ class TransactionProcessor:
 1. Go to [Discord Developer Portal](https://discord.com/developers/applications)
 2. Create a new application
 3. Go to "Bot" section and create a bot
-4. Copy the token to your `.env` file
+4. Copy the token to your `src/config_settings.py` file
 5. Enable these intents:
    - Message Content Intent
    - Server Members Intent
@@ -312,24 +309,28 @@ python ../bot.py
 
 ### Production Checklist
 
-- [ ] Environment variables set correctly
+- [ ] Configuration set correctly in `config_settings.py`
 - [ ] Discord bot token secured
 - [ ] Proper file permissions
 - [ ] Log rotation configured
 - [ ] Error monitoring in place
 - [ ] Backup strategy for sessions
 
-### Environment Variables
+### Configuration
 
-```bash
+All configuration is managed in `src/config_settings.py`:
+
+```python
 # Required
-DISCORD_TOKEN=your_production_token
+DISCORD_TOKEN = "your_production_token"
 
-# Optional
-REMINDER_CHANNEL_ID=channel_id
-DAILY_REMINDER_TIME=09:00
-LOG_LEVEL=INFO
+# Optional settings
+REMINDER_CHANNEL_ID = channel_id
+DAILY_REMINDER_TIME = "09:00"
+CSV_DOWNLOAD_LINK = "https://your-bank.com/export"
 ```
+
+The bot also respects the `TZ` environment variable for timezone configuration.
 
 ### Running in Production
 

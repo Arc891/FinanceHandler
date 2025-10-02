@@ -50,18 +50,18 @@
 4. **Configure the bot**
 
    ```bash
-   # Copy environment template
-   cp .env.example .env
+   # Copy configuration template
+   cp src/config_settings.example.py src/config_settings.py
    
-   # Edit .env with your values
-   nano .env
+   # Edit config_settings.py with your values
+   nano src/config_settings.py
    ```
 
 5. **Set up Discord Bot**
    - Go to [Discord Developer Portal](https://discord.com/developers/applications)
    - Create a new application
    - Go to "Bot" section
-   - Copy the token to your `.env` file
+   - Copy the token to your `src/config_settings.py` file
    - Enable required intents: Message Content, Server Members
 
 6. **Set up Google Sheets (Optional)**
@@ -75,7 +75,7 @@
    e. Download the JSON key file
    f. Save it as `src/config/google_service_account.json`
    g. Share your Google Sheet with the service account email
-   h. Update your `.env` file with Google Sheets configuration
+   h. Update your `src/config_settings.py` file with Google Sheets configuration
 
 7. **Run the bot**
 
@@ -86,33 +86,34 @@
 
 ## Configuration
 
-### Environment Variables (.env)
+### Main Configuration (config_settings.py)
 
-```env
+Edit `src/config_settings.py` to configure the bot:
+
+```python
 # Discord Bot Token (required)
-DISCORD_TOKEN=your_discord_bot_token_here
+DISCORD_TOKEN = "your_discord_bot_token_here"
 
-# Channel ID for daily reminders (optional)
-REMINDER_CHANNEL_ID=your_channel_id_here
+# Daily Reminder Configuration
+DAILY_REMINDER_TIME = "09:00"  # 24-hour format
+REMINDER_CHANNEL_ID = 1234567890123456789  # Channel ID for reminders
+MENTION_USER_IDS = [
+    123456789012345678,  # Your Discord user ID
+    987654321098765432,  # Other user IDs
+]
 
-# Daily reminder time (optional, default: 09:00)
-DAILY_REMINDER_TIME=09:00
+# CSV Download Link (optional)
+CSV_DOWNLOAD_LINK = ""  # URL where users can download CSV files
 
 # Google Sheets Configuration (optional)
-GOOGLE_SHEETS_ENABLED=true
-GOOGLE_CREDENTIALS_PATH=src/config/google_service_account.json
+GOOGLE_SHEETS_ENABLED = True
+GSHEET_NAME = "Your Sheet Name"
+GSHEET_TAB = "Your Tab Name"
 ```
 
 ### User Mentions
 
-Edit `src/config_settings.py` to add Discord user IDs for mentions:
-
-```python
-MENTION_USER_IDS: List[int] = [
-    123456789012345678,  # Your Discord user ID
-    987654321098765432,  # Other user IDs
-]
-```
+Add Discord user IDs to the `MENTION_USER_IDS` list in `config_settings.py` for daily reminder mentions.
 
 ## CSV Format
 
@@ -155,8 +156,8 @@ CATEGORIZATION_RULES_EXPENSE = {
 ## Security
 
 - Never commit your Discord bot token or API keys
-- Use environment variables for sensitive configuration
-- Keep your `.env` file in `.gitignore`
+- Keep your `config_settings.py` file secure
+- Add `src/config_settings.py` to `.gitignore` if it contains sensitive data
 - Regularly rotate your bot token if compromised
 
 ## Support
@@ -166,18 +167,11 @@ If you encounter issues:
 1. Check the bot logs for error messages
 2. Verify your Discord bot permissions
 3. Ensure your CSV format matches the expected structure
-4. Check that all required environment variables are set
+4. Check that all required configuration is set in `src/config_settings.py`
 
 ## Changelog
 
 See [CHANGES.md](CHANGES.md) for detailed change history.
-
-```python
-MENTION_USER_IDS: List[int] = [
-    123456789012345678,  # Replace with actual Discord user IDs
-    987654321098765432,
-]
-```
 
 ### 5. Run the Bot
 
@@ -258,11 +252,11 @@ python bot.py
 Install missing packages:
 
 ```bash
-pip install discord.py python-dotenv
+pip install discord.py
 ```
 
 ### Bot Not Responding
 
-1. Check that the bot token is correct in `.env`
+1. Check that the bot token is correct in `src/config_settings.py`
 2. Ensure the bot has proper permissions in your Discord server
 3. Check the console for error messages
