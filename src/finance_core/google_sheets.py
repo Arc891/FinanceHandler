@@ -132,9 +132,13 @@ class GoogleSheetsExporter:
         amount_str = amount_data.get("amount", "0")
         try:
             amount = float(amount_str)
-            # Return as numeric value for Google Sheets (not string)
-            # Google Sheets will handle the formatting based on cell format
-            amount_value = abs(amount)
+            # Check if transaction was manually switched from its original type
+            if transaction.get("manually_switched", False):
+                # If switched, use negative of the absolute amount to represent the opposite flow
+                amount_value = -abs(amount)
+            else:
+                # Normal case: use absolute amount
+                amount_value = abs(amount)
         except ValueError:
             amount_value = 0.0
         

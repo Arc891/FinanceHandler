@@ -258,6 +258,11 @@ class TransactionView(View):
         tx = remaining.pop(0)
         categorized_tx = {**tx, "category": self.selected_category}
         
+        # Track if transaction type was manually switched from original
+        original_type = "income" if tx["credit_debit_indicator"] == "CRDT" else "expense"
+        if self.transaction_type != original_type:
+            categorized_tx["manually_switched"] = True
+        
         # Always add a description - either custom or auto-generated
         description_source = ""
         if description:
@@ -748,6 +753,11 @@ class CachedTransactionView(View):
         try:
             # Create the properly categorized transaction
             categorized_tx = {**self.transaction, "category": self.selected_category}
+            
+            # Track if transaction type was manually switched from original
+            original_type = "income" if self.transaction["credit_debit_indicator"] == "CRDT" else "expense"
+            if self.transaction_type != original_type:
+                categorized_tx["manually_switched"] = True
             
             # Always add a description - either custom or auto-generated
             if description:
