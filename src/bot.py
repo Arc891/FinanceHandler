@@ -7,7 +7,7 @@ import asyncio
 import logging
 from datetime import datetime
 from zoneinfo import ZoneInfo
-from config_settings import DISCORD_TOKEN, DAILY_REMINDER_TIME, REMINDER_CHANNEL_ID, MENTION_USER_IDS
+from config_settings import DISCORD_TOKEN, DAILY_REMINDER_TIME, REMINDER_CHANNEL_ID, MENTION_USER_IDS, CSV_DOWNLOAD_LINK, TIMEZONE
 
 # Set up logging with unified format and colors
 class ColoredFormatter(logging.Formatter):
@@ -51,13 +51,10 @@ logging.getLogger('discord.http').setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
 
-# Get timezone from environment variable (Docker best practice)
-SYSTEM_TIMEZONE: str = os.environ.get('TZ', 'UTC')
+# Use timezone from config settings (which checks TZ environment variable)
+SYSTEM_TIMEZONE: str = TIMEZONE
 
-if SYSTEM_TIMEZONE != 'UTC':
-    logger.info(f"✅ Using timezone from TZ environment variable: {SYSTEM_TIMEZONE}")
-else:
-    logger.info("🌍 No TZ environment variable set, using UTC")
+logger.info(f"✅ Using timezone from config: {SYSTEM_TIMEZONE}")
 
 logger.info("🚀 Starting Discord Finance Bot...")
 logger.info(f"⏰ Daily reminder: {DAILY_REMINDER_TIME} ({SYSTEM_TIMEZONE})")
@@ -133,7 +130,14 @@ async def daily_reminder():
                 channel = bot.get_channel(REMINDER_CHANNEL_ID)
                 if channel and isinstance(channel, discord.TextChannel):
                     mentions = " ".join([f"<@{user_id}>" for user_id in MENTION_USER_IDS])
+                    
+                    # Build the reminder message
                     message = f"⏰ **Daily Finance Reminder!** {mentions}\n\n📋 Please upload your CSV file using `/upload` to process your transactions."
+                    
+                    # Add CSV download link if configured
+                    if CSV_DOWNLOAD_LINK and CSV_DOWNLOAD_LINK.strip():
+                        message += f"\n\n🔗 **Download your transactions CSV:** {CSV_DOWNLOAD_LINK}"
+                    
                     await channel.send(message)
                     logger.info(f"✅ Daily reminder sent to #{channel.name} at {current_time} {SYSTEM_TIMEZONE}")
                 else:
