@@ -12,7 +12,6 @@ import asyncio
 import logging
 import os
 from datetime import datetime
-from pathlib import Path
 from typing import Optional, Tuple
 
 from playwright.async_api import async_playwright, Browser, BrowserContext, Page
@@ -60,8 +59,13 @@ class ASNBankScraper:
 
         try:
             await self._init_browser()
+            if self.browser is None:
+                logger.error("❌ Browser initialization failed")
+                return False
+
             self.context = await self.browser.new_context(storage_state=self.session_file)
             self.page = await self.context.new_page()
+            assert self.page is not None, "Page initialization failed"
             logger.info("✅ Loaded session from cookies")
             return True
         except Exception as e:
@@ -89,10 +93,14 @@ class ASNBankScraper:
         """
         try:
             await self._init_browser(headless=False)  # Show browser for QR scan
+            if self.browser is None:
+                return False, "Browser initialization failed"
+
             self.context = await self.browser.new_context()
             self.page = await self.context.new_page()
 
             logger.info(f"🌐 Navigating to {self.login_url}")
+            assert self.page is not None, "Page initialization failed"
             await self.page.goto(self.login_url, wait_until="networkidle")
 
             # Wait for QR code to appear
@@ -117,7 +125,7 @@ class ASNBankScraper:
                         if qr_element:
                             logger.info(f"✅ Found QR code with selector: {selector}")
                             break
-                    except:
+                    except Exception:
                         continue
 
                 if not qr_element:
@@ -179,6 +187,9 @@ class ASNBankScraper:
 
         try:
             await self._init_browser(headless=headless)
+            if self.browser is None:
+                logger.error("❌ Browser initialization failed")
+                return False
 
             # Load existing session if available to preserve device registration
             if os.path.exists(self.session_file):
@@ -191,6 +202,7 @@ class ASNBankScraper:
             self.page = await self.context.new_page()
 
             logger.info(f"🌐 Navigating to {self.login_url}")
+            assert self.page is not None, "Page initialization failed"
             await self.page.goto(self.login_url, wait_until="networkidle")
 
             # Wait for page to load
@@ -218,7 +230,7 @@ class ASNBankScraper:
                         logger.info(f"✅ Clicked browsercode option: {selector}")
                         clicked_option = True
                         break
-                except:
+                except Exception:
                     continue
 
             if not clicked_option:
@@ -248,7 +260,7 @@ class ASNBankScraper:
                         logger.info(f"✅ Entered browsercode: {selector}")
                         input_filled = True
                         break
-                except:
+                except Exception:
                     continue
 
             if not input_filled:
@@ -280,7 +292,7 @@ class ASNBankScraper:
                         logger.info(f"✅ Clicked submit button: {selector}")
                         clicked_submit = True
                         break
-                except:
+                except Exception:
                     continue
 
             if not clicked_submit:
@@ -379,6 +391,7 @@ class ASNBankScraper:
                         return None
 
                 # Navigate to transactions page
+                assert self.page is not None, "Page not initialized"
                 await self.page.goto(self.transactions_url, wait_until="networkidle")
                 logger.info("📄 On transactions page")
 
@@ -423,7 +436,7 @@ class ASNBankScraper:
                             clicked = True
                             logger.info(f"✅ Clicked download button: {selector}")
                             break
-                        except:
+                        except Exception:
                             continue
 
                     if not clicked:
@@ -447,7 +460,7 @@ class ASNBankScraper:
                 return filepath
 
             except Exception as e:
-                logger.error(f"❌ Download attempt {attempt + 1} failed: {e}")
+                logger.error("❌ Download attempt %d failed: %s", attempt + 1, e)
 
                 if attempt < max_retries - 1:
                     wait_time = 2 ** attempt  # Exponential backoff
@@ -505,7 +518,7 @@ async def main():
         success, qr_path = await scraper.login_with_qr()
 
         if success:
-            print(f"✅ Login successful, session saved")
+            print("✅ Login successful, session saved")
         else:
             print(f"❌ Login failed: {qr_path}")
 
