@@ -34,7 +34,7 @@ class ASNBankScraper:
         self.session_file = session_file
         self.download_dir = download_dir
         self.login_url = "https://www.asnbank.nl/inloggen"
-        self.transactions_url = "https://www.asnbank.nl/internet-bankieren/overzicht"
+        self.transactions_url = "https://www.asnbank.nl/online/web/onlinebankieren/"
         self.qr_timeout = 300  # 5 minutes for QR scan
 
         self.browser: Optional[Browser] = None
@@ -158,6 +158,164 @@ class ASNBankScraper:
         except Exception as e:
             logger.error(f"❌ QR login error: {e}")
             return False, str(e)
+
+    async def login_with_browsercode(self, browsercode: str, headless: bool = False) -> bool:
+        """
+        Login using browsercode (5-digit PIN) instead of QR code.
+
+        This method requires one-time setup on the automation server to register
+        the device. Once registered, the session persists via cookies.
+
+        Args:
+            browsercode: 5-digit browsercode PIN
+            headless: Whether to run browser in headless mode
+
+        Returns:
+            True if login successful, False otherwise
+        """
+        if not browsercode or len(browsercode) != 5 or not browsercode.isdigit():
+            logger.error("❌ Invalid browsercode: must be 5 digits")
+            return False
+
+        try:
+            await self._init_browser(headless=headless)
+
+            # Load existing session if available to preserve device registration
+            if os.path.exists(self.session_file):
+                logger.info("📂 Loading existing session for device registration")
+                self.context = await self.browser.new_context(storage_state=self.session_file)
+            else:
+                logger.info("🆕 Creating new browser context")
+                self.context = await self.browser.new_context()
+
+            self.page = await self.context.new_page()
+
+            logger.info(f"🌐 Navigating to {self.login_url}")
+            await self.page.goto(self.login_url, wait_until="networkidle")
+
+            # Wait for page to load
+            await asyncio.sleep(2)
+
+            # Try to find and click browsercode option
+            # Note: Selectors need to be updated based on actual ASN Bank HTML
+            logger.info("🔍 Looking for browsercode login option...")
+
+            browsercode_option_selectors = [
+                "button:has-text('Browsercode')",
+                "a:has-text('Browsercode')",
+                "[data-test*='browsercode']",
+                ".browsercode-option",
+                "button:has-text('Code')",
+                "[class*='browsercode']",
+            ]
+
+            clicked_option = False
+            for selector in browsercode_option_selectors:
+                try:
+                    element = await self.page.wait_for_selector(selector, timeout=5000)
+                    if element:
+                        await element.click()
+                        logger.info(f"✅ Clicked browsercode option: {selector}")
+                        clicked_option = True
+                        break
+                except:
+                    continue
+
+            if not clicked_option:
+                logger.warning("⚠️ Could not find browsercode option button, proceeding anyway...")
+
+            # Wait for browsercode input field
+            await asyncio.sleep(1)
+
+            # Try to find browsercode input field
+            logger.info("🔍 Looking for browsercode input field...")
+
+            browsercode_input_selectors = [
+                "input[name='browsercode']",
+                "input[type='password'][placeholder*='code']",
+                "input[id*='browsercode']",
+                "input[placeholder*='Browsercode']",
+                "input[type='text'][maxlength='5']",
+                "input[type='password'][maxlength='5']",
+            ]
+
+            input_filled = False
+            for selector in browsercode_input_selectors:
+                try:
+                    input_element = await self.page.wait_for_selector(selector, timeout=5000)
+                    if input_element:
+                        await input_element.fill(browsercode)
+                        logger.info(f"✅ Entered browsercode: {selector}")
+                        input_filled = True
+                        break
+                except:
+                    continue
+
+            if not input_filled:
+                logger.error("❌ Could not find browsercode input field")
+                # Save debug screenshot
+                debug_path = "/tmp/asn_browsercode_debug.png"
+                await self.page.screenshot(path=debug_path, full_page=True)
+                logger.error(f"📸 Debug screenshot saved to {debug_path}")
+                return False
+
+            # Try to find and click submit button
+            logger.info("🔍 Looking for submit button...")
+
+            submit_selectors = [
+                "button[type='submit']",
+                "button:has-text('Inloggen')",
+                "button:has-text('Login')",
+                "input[type='submit']",
+                "[data-test*='submit']",
+                ".submit-button",
+            ]
+
+            clicked_submit = False
+            for selector in submit_selectors:
+                try:
+                    submit_btn = await self.page.wait_for_selector(selector, timeout=5000)
+                    if submit_btn:
+                        await submit_btn.click()
+                        logger.info(f"✅ Clicked submit button: {selector}")
+                        clicked_submit = True
+                        break
+                except:
+                    continue
+
+            if not clicked_submit:
+                logger.warning("⚠️ Could not find submit button, trying Enter key...")
+                await self.page.keyboard.press("Enter")
+
+            # Wait for login success (redirect to dashboard)
+            logger.info("⏳ Waiting for login to complete...")
+
+            try:
+                await self.page.wait_for_url("**/overzicht**", timeout=30000)
+                logger.info("✅ Browsercode login successful!")
+
+                # Save session for future use
+                await self._save_session()
+
+                return True
+
+            except Exception as e:
+                logger.error(f"❌ Login failed or timed out: {e}")
+
+                # Check if we're on an error page or still on login
+                current_url = self.page.url
+                logger.error(f"Current URL: {current_url}")
+
+                # Save debug screenshot
+                debug_path = "/tmp/asn_browsercode_error.png"
+                await self.page.screenshot(path=debug_path, full_page=True)
+                logger.error(f"📸 Error screenshot saved to {debug_path}")
+
+                return False
+
+        except Exception as e:
+            logger.error(f"❌ Browsercode login error: {e}")
+            return False
 
     async def is_session_valid(self) -> bool:
         """

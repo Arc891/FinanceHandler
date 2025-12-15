@@ -7,7 +7,7 @@ import asyncio
 import logging
 from datetime import datetime
 from zoneinfo import ZoneInfo
-from config_settings import DISCORD_TOKEN, DAILY_REMINDER_TIME, REMINDER_CHANNEL_ID, MENTION_USER_IDS, CSV_DOWNLOAD_LINK, TIMEZONE
+from config.config_settings import DISCORD_TOKEN, DAILY_REMINDER_TIME, REMINDER_CHANNEL_ID, MENTION_USER_IDS, CSV_DOWNLOAD_LINK, TIMEZONE
 
 # Set up logging with unified format and colors
 class ColoredFormatter(logging.Formatter):

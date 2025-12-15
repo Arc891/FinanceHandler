@@ -56,9 +56,9 @@ else
     echo "✅ .env already exists"
 fi
 
-if [ ! -f "src/config_settings.py" ]; then
-    if [ -f "src/config_settings.example.py" ]; then
-        cp src/config_settings.example.py src/config_settings.py
+if [ ! -f "src/config/config_settings.py" ]; then
+    if [ -f "src/config/config_settings.example.py" ]; then
+        cp src/config/config_settings.example.py src/config/config_settings.py
         echo "✅ Created config_settings.py from template"
     else
         echo "⚠️ config_settings.example.py not found"
@@ -78,7 +78,7 @@ echo "🎉 Setup complete!"
 echo ""
 echo "📝 Next steps:"
 echo "   1. Edit .env file with your Discord bot token"
-echo "   2. Edit src/config_settings.py to add user IDs for mentions"
+echo "   2. Edit src/config/config_settings.py to add user IDs for mentions"
 echo "   3. Run the bot: cd src && python bot.py"
 echo ""
 echo "💡 Don't forget to:"

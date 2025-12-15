@@ -9,7 +9,7 @@
 *.env
 
 # Configuration files with sensitive data
-src/config_settings.py
+src/config/config_settings.py
 config_local.py
 src/config/google_service_account.json
 
@@ -76,6 +76,9 @@ dmypy.json
 # Data directories (runtime files)
 data/sessions/
 data/uploads/
+data/bank_downloads/
+data/bank_session.json
+data/browser_profile/
 *.csv
 *.xlsx
 *.xls

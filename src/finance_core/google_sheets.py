@@ -4,7 +4,7 @@ import gspread
 import logging
 from typing import List, Dict, Any, Tuple, Optional
 from google.oauth2.service_account import Credentials
-from config_settings import GSHEET_NAME, GSHEET_TAB
+from config.config_settings import GSHEET_NAME, GSHEET_TAB
 import os
 
 logger = logging.getLogger(__name__)
@@ -248,7 +248,7 @@ def export_to_google_sheets(
     """
     if credentials_path is None:
         try:
-            from config_settings import GOOGLE_CREDENTIALS_PATH
+            from config.config_settings import GOOGLE_CREDENTIALS_PATH
             credentials_path = GOOGLE_CREDENTIALS_PATH
         except ImportError:
             # Fallback to default path
@@ -257,7 +257,7 @@ def export_to_google_sheets(
     
     # Check if Google Sheets is enabled
     try:
-        from config_settings import GOOGLE_SHEETS_ENABLED
+        from config.config_settings import GOOGLE_SHEETS_ENABLED
         if not GOOGLE_SHEETS_ENABLED:
             raise Exception("Google Sheets integration is disabled in configuration")
     except ImportError:

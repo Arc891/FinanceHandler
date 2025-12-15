@@ -13,7 +13,7 @@ from finance_core.session_management import (
 )
 from finance_core.ui.cached_transactions_view import CachedTransactionsView
 from finance_core.export import process_csv_file
-from config_settings import UPLOAD_DIR
+from config.config_settings import UPLOAD_DIR
 
 logger = logging.getLogger(__name__)
 

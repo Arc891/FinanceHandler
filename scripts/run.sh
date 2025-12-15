@@ -40,8 +40,8 @@ if [[ ! -f "Dockerfile" ]]; then
     exit 1
 fi
 
-if [[ ! -f "src/config_settings.py" ]]; then
-    echo "❌ Error: src/config_settings.py not found"
+if [[ ! -f "src/config/config_settings.py" ]]; then
+    echo "❌ Error: src/config/config_settings.py not found"
     echo "Please ensure your Discord bot configuration is set up"
     exit 1
 fi
@@ -53,7 +53,7 @@ fi
 
 # Extract Discord token from local config for container
 echo "🔑 Extracting Discord token from config..."
-if [[ -f "src/config_settings.py" ]]; then
+if [[ -f "src/config/config_settings.py" ]]; then
     # Try to get token from environment first, then from config file
     DISCORD_TOKEN_VALUE=$(python3 -c "
 import sys
@@ -107,7 +107,7 @@ fi
 "$DOCKER_SCRIPT" \
     $ADDITIONAL_FLAGS \
     --image "finance-automation-bot" \
-    --port "8080" \
+    --port "8383" \
     --registry "registry.arc8.dev" \
     --version-file "package.json" \
     --docker-run-args "${DOCKER_RUN_ARGS[@]}"

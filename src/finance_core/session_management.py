@@ -5,11 +5,11 @@ import json
 import uuid
 from typing import List, Dict, Any, Tuple, Optional
 from datetime import datetime
-from config_settings import GSHEET_EXPENSE_START_ROW, GSHEET_INCOME_START_ROW
+from config.config_settings import GSHEET_EXPENSE_START_ROW, GSHEET_INCOME_START_ROW
 
 # Import session directory from config
 try:
-    from config_settings import SESSION_DIR as _SESSION_DIR
+    from config.config_settings import SESSION_DIR as _SESSION_DIR
     # Make the session directory absolute relative to the project root
     # This file is at: finance_core/session_management.py
     # Go up: finance_core -> src -> project_root (two levels up)

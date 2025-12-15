@@ -65,7 +65,7 @@ class TransactionApproval(BaseModel):
 def verify_api_key(x_api_key: str = Header(None)) -> bool:
     """Verify API key from header."""
     try:
-        from config_settings import API_SECRET_KEY
+        from config.config_settings import API_SECRET_KEY
         expected_key = API_SECRET_KEY
     except ImportError:
         expected_key = os.environ.get('API_SECRET_KEY', 'change-me-in-production')
@@ -99,12 +99,61 @@ async def health_check():
     }
 
 
-@app.post("/api/qr-login", response_model=QRLoginResponse)
+@app.post("/api/login")
+async def login_with_browsercode(x_api_key: str = Header(..., alias="X-API-Key")):
+    """
+    Login to ASN Bank using browsercode.
+
+    This endpoint:
+    1. Checks if session is already valid (returns immediately if yes)
+    2. Attempts login with browsercode from environment variable
+    3. Saves session for future use
+
+    Note: Browsercode must be set as environment variable ASN_BROWSERCODE
+    """
+    verify_api_key(x_api_key)
+
+    try:
+        from automation.bank_scraper import ASNBankScraper
+        from config.config_settings import ASN_BROWSERCODE
+
+        if not ASN_BROWSERCODE:
+            raise HTTPException(
+                status_code=400,
+                detail="ASN_BROWSERCODE not configured. Set environment variable ASN_BROWSERCODE."
+            )
+
+        scraper = ASNBankScraper()
+
+        # Check existing session first
+        if await scraper.is_session_valid():
+            await scraper.cleanup()
+            return {"success": True, "message": "Session already valid, no login needed"}
+
+        # Login with browsercode
+        logger.info("🔐 Attempting browsercode login...")
+        success = await scraper.login_with_browsercode(ASN_BROWSERCODE, headless=False)
+        await scraper.cleanup()
+
+        if success:
+            return {"success": True, "message": "Browsercode login successful, session saved"}
+        else:
+            return {"success": False, "message": "Browsercode login failed, check logs for details"}
+
+    except Exception as e:
+        logger.error(f"❌ Browsercode login endpoint error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/qr-login", response_model=QRLoginResponse, deprecated=True)
 async def initiate_qr_login(x_api_key: str = Header(..., alias="X-API-Key")):
     """
-    Initiate QR login flow for ASN Bank.
+    [DEPRECATED] Initiate QR login flow for ASN Bank.
 
-    Returns QR code image path for Discord to upload.
+    This method is deprecated in favor of browsercode login (/api/login).
+    QR codes refresh every 4-5 seconds, making automation impossible.
+
+    Use /api/login instead for browsercode authentication.
     """
     verify_api_key(x_api_key)
 
@@ -157,7 +206,7 @@ async def check_bank_session(x_api_key: str = Header(..., alias="X-API-Key")):
         else:
             return SessionCheckResponse(
                 valid=False,
-                message="Bank session expired, QR login required"
+                message="Bank session expired, browsercode login required (use /api/login)"
             )
 
     except Exception as e:
@@ -341,7 +390,7 @@ if __name__ == "__main__":
 
     # Get port from environment or config
     try:
-        from config_settings import API_PORT, API_HOST
+        from config.config_settings import API_PORT, API_HOST
         port = API_PORT
         host = API_HOST
     except ImportError:

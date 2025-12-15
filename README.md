@@ -51,17 +51,17 @@
 
    ```bash
    # Copy configuration template
-   cp src/config_settings.example.py src/config_settings.py
+   cp src/config/config_settings.example.py src/config/config_settings.py
    
    # Edit config_settings.py with your values
-   nano src/config_settings.py
+   nano src/config/config_settings.py
    ```
 
 5. **Set up Discord Bot**
    - Go to [Discord Developer Portal](https://discord.com/developers/applications)
    - Create a new application
    - Go to "Bot" section
-   - Copy the token to your `src/config_settings.py` file
+   - Copy the token to your `src/config/config_settings.py` file
    - Enable required intents: Message Content, Server Members
 
 6. **Set up Google Sheets (Optional)**
@@ -75,7 +75,7 @@
    e. Download the JSON key file
    f. Save it as `src/config/google_service_account.json`
    g. Share your Google Sheet with the service account email
-   h. Update your `src/config_settings.py` file with Google Sheets configuration
+   h. Update your `src/config/config_settings.py` file with Google Sheets configuration
 
 7. **Run the bot**
 
@@ -88,7 +88,7 @@
 
 ### Main Configuration (config_settings.py)
 
-Edit `src/config_settings.py` to configure the bot:
+Edit `src/config/config_settings.py` to configure the bot:
 
 ```python
 # Discord Bot Token (required)
@@ -157,7 +157,7 @@ CATEGORIZATION_RULES_EXPENSE = {
 
 - Never commit your Discord bot token or API keys
 - Keep your `config_settings.py` file secure
-- Add `src/config_settings.py` to `.gitignore` if it contains sensitive data
+- Add `src/config/config_settings.py` to `.gitignore` if it contains sensitive data
 - Regularly rotate your bot token if compromised
 
 ## Support
@@ -167,11 +167,11 @@ If you encounter issues:
 1. Check the bot logs for error messages
 2. Verify your Discord bot permissions
 3. Ensure your CSV format matches the expected structure
-4. Check that all required configuration is set in `src/config_settings.py`
+4. Check that all required configuration is set in `src/config/config_settings.py`
 
 ## Changelog
 
-See [CHANGES.md](CHANGES.md) for detailed change history.
+See [docs/CHANGES.md](docs/CHANGES.md) for detailed change history.
 
 ### 5. Run the Bot
 
@@ -197,26 +197,37 @@ The bot will send daily reminders at 09:00 (configurable) to upload CSV files fo
 ## File Structure
 
 ```txt
-src/
-├── bot.py                    # Main bot file
-├── bot_commands.py           # Slash command definitions
-├── config_settings.py       # Configuration settings
-├── constants.py              # Category enums and rules
-├── asnexport.py             # Legacy CSV processing (deprecated)
-├── config/
-│   ├── google_service_account.json  # Google Sheets credentials
-│   └── spaarpot_uuid_map.py # Savings account mapping
-└── finance_core/
-    ├── csv_helper.py         # CSV loading and normalization
-    ├── export.py             # Main processing logic
-    ├── google_sheets.py      # Google Sheets integration
-    ├── session_management.py # Session persistence
-    └── ui/
-        └── transaction_prompt.py # Interactive UI components
-
-data/                         # Runtime data directory
-├── sessions/                 # User session persistence
-└── uploads/                  # Uploaded CSV files
+/
+├── README.md                 # Project readme
+├── CLAUDE.md                 # Claude Code instructions
+├── docs/                     # Documentation
+│   ├── CHANGES.md           # Changelog
+│   ├── DEVELOPMENT.md       # Development guide
+│   └── automation/          # Automation docs
+├── scripts/                  # Utility scripts
+│   ├── setup.sh             # Quick setup
+│   ├── run.sh               # Docker deployment
+│   └── browsercode/         # Bank automation
+├── src/                      # Source code
+│   ├── bot.py               # Main entry point
+│   ├── bot_commands.py      # Slash commands
+│   ├── constants.py         # Categories & rules
+│   ├── config/              # Configuration (NOT in git)
+│   │   ├── config_settings.py
+│   │   └── google_service_account.json
+│   ├── api/                 # Automation API
+│   ├── automation/          # Bank scraper
+│   └── finance_core/        # Core finance logic
+│       ├── csv_helper.py
+│       ├── export.py
+│       ├── google_sheets.py
+│       ├── session_management.py
+│       └── ui/
+└── data/                     # Runtime data (NOT in git)
+    ├── sessions/            # User sessions
+    ├── uploads/             # CSV uploads
+    ├── bank_downloads/      # Downloaded CSVs
+    └── browser_profile/     # Browser session
 ```
 
 ## Environment Configuration
@@ -257,6 +268,6 @@ pip install discord.py
 
 ### Bot Not Responding
 
-1. Check that the bot token is correct in `src/config_settings.py`
+1. Check that the bot token is correct in `src/config/config_settings.py`
 2. Ensure the bot has proper permissions in your Discord server
 3. Check the console for error messages

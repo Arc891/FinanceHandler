@@ -76,7 +76,7 @@ BANK_DOWNLOAD_DIR = "data/bank_downloads"
 
 # ASN Bank Configuration
 ASN_LOGIN_URL = "https://www.asnbank.nl/inloggen"
-ASN_TRANSACTIONS_URL = "https://www.asnbank.nl/internet-bankieren/overzicht"
+ASN_TRANSACTIONS_URL = "https://www.asnbank.nl/online/web/onlinebankieren/"
 ASN_QR_TIMEOUT_SECONDS = 300  # 5 minutes for QR scan
 
 # AI Categorization (Session 2 - will be configured later)

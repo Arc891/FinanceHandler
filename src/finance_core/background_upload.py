@@ -54,7 +54,7 @@ class GoogleSheetsUploadQueue:
         
         # Load configurable starting rows
         try:
-            from config_settings import GSHEET_EXPENSE_START_ROW, GSHEET_INCOME_START_ROW
+            from config.config_settings import GSHEET_EXPENSE_START_ROW, GSHEET_INCOME_START_ROW
             self.default_expense_start_row = GSHEET_EXPENSE_START_ROW
             self.default_income_start_row = GSHEET_INCOME_START_ROW
         except ImportError:
@@ -569,7 +569,7 @@ def get_upload_queue() -> GoogleSheetsUploadQueue:
     global _upload_queue
     if _upload_queue is None:
         try:
-            from config_settings import GOOGLE_CREDENTIALS_PATH
+            from config.config_settings import GOOGLE_CREDENTIALS_PATH
             credentials_path = GOOGLE_CREDENTIALS_PATH
         except ImportError:
             # Fallback to default path
