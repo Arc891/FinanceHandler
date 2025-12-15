@@ -59,7 +59,7 @@ if [[ -f "src/config/config_settings.py" ]]; then
 import sys
 sys.path.append('src')
 try:
-    from config_settings import DISCORD_TOKEN
+    from config.config_settings import DISCORD_TOKEN
     if DISCORD_TOKEN and DISCORD_TOKEN != 'your_discord_token_here':
         print(DISCORD_TOKEN)
     else:
