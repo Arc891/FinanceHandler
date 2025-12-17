@@ -11,8 +11,8 @@ See data_anonymizer.py for details on what is removed/kept.
 import json
 import logging
 from typing import Dict, Any, Optional, Tuple
-from anthropic import Anthropic
 from automation.data_anonymizer import anonymize_for_ai, get_anonymized_summary
+from automation.claude_provider import ClaudeProvider
 
 # Configure logging with color
 logging.basicConfig(
@@ -25,20 +25,27 @@ logger = logging.getLogger(__name__)
 class ClaudeCategorizer:
     """Categorizes transactions using Claude API with confidence scoring."""
 
-    def __init__(self, api_key: str, model: str = "claude-3-5-haiku-20241022"):
+    def __init__(self, api_key: Optional[str] = None, model: str = "haiku"):
         """
         Initialize the Claude categorizer.
 
-        Args:
-            api_key: Anthropic API key
-            model: Claude model to use (default: Haiku for cost efficiency)
-        """
-        if not api_key:
-            raise ValueError("CLAUDE_API_KEY is required for AI categorization")
+        Tries Claude Code CLI first (free), falls back to API if provided.
 
-        self.client = Anthropic(api_key=api_key)
+        Args:
+            api_key: Optional Anthropic API key (for API fallback)
+            model: Model alias (haiku, sonnet, opus) - default: haiku for cost efficiency
+        """
+        self.provider = ClaudeProvider(api_key=api_key, model=model)
         self.model = model
-        logger.info(f"Initialized ClaudeCategorizer with model: {model}")
+
+        if self.provider.use_cli:
+            logger.info(f"Initialized ClaudeCategorizer with Claude Code CLI (model: {model})")
+        elif self.provider.api_client:
+            logger.info(f"Initialized ClaudeCategorizer with Anthropic API (model: {model})")
+        else:
+            raise ValueError(
+                "No Claude access available. Install Claude Code or set CLAUDE_API_KEY."
+            )
 
     def categorize_transaction(
         self,
@@ -112,18 +119,13 @@ class ClaudeCategorizer:
         )
 
         try:
-            # Call Claude API
-            response = self.client.messages.create(
-                model=self.model,
+            # Call Claude (CLI or API)
+            response_text = self.provider.complete(
+                prompt=prompt,
                 max_tokens=500,
-                temperature=0.3,  # Lower temperature for more consistent categorization
-                messages=[
-                    {"role": "user", "content": prompt}
-                ]
+                temperature=0.3  # Lower temperature for more consistent categorization
             )
 
-            # Parse response
-            response_text = response.content[0].text
             logger.debug(f"Claude response: {response_text}")
 
             # Extract JSON from response

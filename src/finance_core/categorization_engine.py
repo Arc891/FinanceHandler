@@ -14,6 +14,8 @@ import logging
 from typing import Dict, Any, Optional, Tuple
 from dataclasses import dataclass
 
+from automation.ai_categorizer import ClaudeCategorizer
+
 logger = logging.getLogger(__name__)
 
 
@@ -36,7 +38,7 @@ class CategorizationEngine:
 
     def __init__(
         self,
-        ai_categorizer=None,
+        ai_categorizer: ClaudeCategorizer | None = None,
         ai_confidence_threshold: float = 0.75,
         ai_enabled: bool = False
     ):
@@ -238,7 +240,7 @@ def create_categorization_engine(
     Factory function to create a categorization engine with optional AI.
 
     Args:
-        claude_api_key: Optional Claude API key for AI categorization
+        claude_api_key: Optional Claude API key (not required if Claude Code CLI available)
         ai_enabled: Whether to enable AI categorization
         ai_confidence_threshold: Minimum confidence for auto-approval
 
@@ -247,9 +249,10 @@ def create_categorization_engine(
     """
     ai_categorizer = None
 
-    if ai_enabled and claude_api_key:
+    if ai_enabled:
         try:
             from automation.ai_categorizer import ClaudeCategorizer
+            # API key is optional - ClaudeCategorizer will use CLI if available
             ai_categorizer = ClaudeCategorizer(api_key=claude_api_key)
             logger.info("AI categorization enabled")
         except Exception as e:
