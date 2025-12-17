@@ -16,21 +16,25 @@ Transaction Input
 │  (existing 26 patterns) │
 └─────────────────────────┘
     ↓
-  Match? ──YES→ Category (confidence: 1.0)
+  Match? ──YES→ Category (confidence: 1.0) → Auto-upload to Google Sheets ✅
     ↓
    NO
     ↓
 ┌─────────────────────────┐
 │  2. AI Categorization   │
-│  (Claude 3.5 Haiku)     │
+│  (Claude Code CLI/API)  │
 └─────────────────────────┘
     ↓
-  Confidence ≥ 0.75? ──YES→ Auto-approve
+  Confidence ≥ 0.75? ──YES→ Auto-upload to Google Sheets ✅
     ↓
    NO (< 0.75)
     ↓
-  Send to Discord for manual approval
+  Send to Discord for manual review ⚠️
+    ↓
+  User approves → Upload to Google Sheets ✅
 ```
+
+**New in v2**: High-confidence transactions (regex + AI ≥75%) are automatically uploaded to Google Sheets without user interaction. Use `/review` command to inspect auto-categorizations.
 
 ## Architecture
 
@@ -126,15 +130,65 @@ print(f"AI Auto: {len(ai_auto)}")
 print(f"Manual Review: {len(needs_approval)}")
 ```
 
+## Discord Bot Integration
+
+### Upload Flow
+
+When a user uploads a CSV via `/upload`:
+
+1. **Auto-Categorization Phase**:
+   - All transactions processed by categorization engine
+   - Regex matches (100% confidence) → Auto-uploaded immediately
+   - AI matches ≥75% confidence → Auto-uploaded immediately
+   - AI matches <75% confidence → Queued for manual review
+
+2. **Summary Message**:
+   ```
+   ✅ Auto-categorized 45/50 transactions (40 regex, 5 AI)
+   🔍 5 transactions need manual review.
+
+   💡 Use `/review` to check auto-categorizations.
+   ```
+
+3. **Manual Review** (only for low-confidence):
+   - Discord UI prompts shown for remaining transactions
+   - User selects category and confirms
+
+### Review Command
+
+Use `/review` to inspect auto-categorizations from current session:
+
+```
+/review
+```
+
+Shows all auto-categorized transactions with:
+- 📋 = Regex matched
+- 🤖 = AI categorized
+- Category, description, and confidence percentage
+- Transaction details (counterparty, amount)
+
+**Note**: Auto-categorized transactions are already uploaded to Google Sheets. To correct, edit directly in the sheet.
+
+### Status Command
+
+```
+/status
+```
+
+Shows session progress including auto-categorized count.
+
 ## Testing
 
 ### Run Test Suite
 
 ```bash
-# Set API key (required for AI tests)
-export CLAUDE_API_KEY="sk-ant-..."
+# Option 1: Claude Code CLI (free)
+# No API key needed, uses your Claude Code subscription
+python test_ai_local.py
 
-# Run tests
+# Option 2: Anthropic API (requires credits)
+export CLAUDE_API_KEY="sk-ant-..."
 python scripts/test_ai_categorization.py
 ```
 

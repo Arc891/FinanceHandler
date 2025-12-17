@@ -38,6 +38,7 @@ def _load_full_session(user_id: int) -> Dict[str, Any]:
             "income": [],
             "expenses": [],
             "cached": [],
+            "auto_categorized": [],
             "sheet_positions": {
                 "expense_row": GSHEET_EXPENSE_START_ROW,
                 "income_row": GSHEET_INCOME_START_ROW,
@@ -53,6 +54,7 @@ def _load_full_session(user_id: int) -> Dict[str, Any]:
             "income": data.get("income", []),
             "expenses": data.get("expenses", []),
             "cached": data.get("cached", []),
+            "auto_categorized": data.get("auto_categorized", []),
             "sheet_positions": data.get("sheet_positions", {
                 "expense_row": GSHEET_EXPENSE_START_ROW,
                 "income_row": GSHEET_INCOME_START_ROW,
@@ -173,4 +175,45 @@ def reset_sheet_positions(user_id: int) -> None:
         "income_row": 2,
         "last_updated": None
     }
+    _save_full_session(user_id, session_data)
+
+
+# === Auto-Categorized Transactions Management ===
+
+def add_auto_categorized_transaction(
+    user_id: int,
+    transaction: Dict[str, Any],
+    category: str,
+    description: str,
+    transaction_type: str,
+    method: str,
+    confidence: float
+) -> None:
+    """Add an auto-categorized transaction to the session"""
+    session_data = _load_full_session(user_id)
+
+    auto_cat_tx = {
+        "transaction": transaction,
+        "category": category,
+        "description": description,
+        "transaction_type": transaction_type,
+        "method": method,
+        "confidence": confidence,
+        "timestamp": datetime.now().isoformat()
+    }
+
+    session_data["auto_categorized"].append(auto_cat_tx)
+    _save_full_session(user_id, session_data)
+
+
+def get_auto_categorized_transactions(user_id: int) -> List[Dict[str, Any]]:
+    """Get all auto-categorized transactions for current session"""
+    session_data = _load_full_session(user_id)
+    return session_data["auto_categorized"]
+
+
+def clear_auto_categorized_transactions(user_id: int) -> None:
+    """Clear all auto-categorized transactions"""
+    session_data = _load_full_session(user_id)
+    session_data["auto_categorized"] = []
     _save_full_session(user_id, session_data)

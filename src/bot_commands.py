@@ -118,28 +118,28 @@ class FinanceBot(commands.Cog):
     @app_commands.command(name="cached", description="View and process your cached transactions")
     async def cached(self, interaction: discord.Interaction):
         user_id = interaction.user.id
-        
+
         try:
             from finance_core.session_management import get_cached_transactions
             cached_transactions = get_cached_transactions(user_id)
         except Exception as e:
             await interaction.response.send_message(f"❌ Error loading cached transactions: {str(e)}", ephemeral=True)
             return
-        
+
         if not cached_transactions:
             await interaction.response.send_message("📦 No cached transactions found.", ephemeral=True)
             # Auto-delete after 3 seconds
             response = await interaction.original_response()
             asyncio.create_task(self._delete_after_delay(response, 3))
             return
-        
+
         # Create summary of cached transactions
         embed = discord.Embed(
-            title="📦 Cached Transactions", 
+            title="📦 Cached Transactions",
             description=f"You have {len(cached_transactions)} cached transaction(s)",
             color=discord.Color.orange()
         )
-        
+
         # Add up to 10 transactions to avoid embed limits
         for i, cached_tx in enumerate(cached_transactions[:10]):
             tx_type_emoji = "💵" if cached_tx["transaction_type"] == "income" else "💸"
@@ -149,14 +149,14 @@ class FinanceBot(commands.Cog):
                       f"📅 {cached_tx['timestamp'][:19].replace('T', ' ')}",  # Simple timestamp formatting
                 inline=False
             )
-        
+
         if len(cached_transactions) > 10:
             embed.add_field(
                 name="📋 More transactions",
                 value=f"... and {len(cached_transactions) - 10} more. Use the buttons below to process them.",
                 inline=False
             )
-        
+
         # Add processing instructions
         embed.add_field(
             name="🔧 Next Steps",
@@ -165,10 +165,77 @@ class FinanceBot(commands.Cog):
                   "⚠️ Processed transactions will replace the dummy entries in your Google Sheet.",
             inline=False
         )
-        
+
         # Create view with action buttons
         view = CachedTransactionsView(user_id, cached_transactions)
         await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
+    @app_commands.command(name="review", description="Review auto-categorized transactions from current session")
+    async def review(self, interaction: discord.Interaction):
+        user_id = interaction.user.id
+
+        try:
+            from finance_core.session_management import get_auto_categorized_transactions
+            auto_cats = get_auto_categorized_transactions(user_id)
+        except Exception as e:
+            await interaction.response.send_message(f"❌ Error loading auto-categorizations: {str(e)}", ephemeral=True)
+            return
+
+        if not auto_cats:
+            await interaction.response.send_message("✅ No auto-categorized transactions in current session.", ephemeral=True)
+            # Auto-delete after 3 seconds
+            response = await interaction.original_response()
+            asyncio.create_task(self._delete_after_delay(response, 3))
+            return
+
+        # Create summary embed
+        embed = discord.Embed(
+            title="🤖 Auto-Categorized Transactions",
+            description=f"Review {len(auto_cats)} automatically categorized transaction{'s' if len(auto_cats) > 1 else ''} from your current session.",
+            color=discord.Color.green()
+        )
+
+        # Add up to 10 transactions to avoid embed limits
+        for i, auto_cat in enumerate(auto_cats[:10]):
+            tx = auto_cat["transaction"]
+            amount = tx.get("transaction_amount", {}).get("amount", "0")
+            tx_type_emoji = "💵" if auto_cat["transaction_type"] == "income" else "💸"
+            method_emoji = "📋" if auto_cat["method"] == "regex" else "🤖"
+            confidence_pct = int(auto_cat["confidence"] * 100)
+
+            # Get counterparty name
+            counterparty = tx.get("creditor", {}).get("name") or tx.get("debtor", {}).get("name", "Unknown")
+
+            embed.add_field(
+                name=f"{tx_type_emoji} {method_emoji} {counterparty} - €{amount}",
+                value=f"**{auto_cat['category']}** • {auto_cat['description'][:80]}{'...' if len(auto_cat['description']) > 80 else ''}\n"
+                      f"Confidence: {confidence_pct}%",
+                inline=False
+            )
+
+        if len(auto_cats) > 10:
+            embed.add_field(
+                name="📋 More transactions",
+                value=f"... and {len(auto_cats) - 10} more auto-categorized transactions.",
+                inline=False
+            )
+
+        # Add legend and notes
+        legend = "📋 = Regex matched | 🤖 = AI categorized\n"
+        legend += "💸 = Expense | 💵 = Income\n\n"
+        legend += "✅ All transactions shown have been uploaded to Google Sheets.\n"
+        legend += "⚠️ To correct a categorization, you'll need to edit it directly in your Google Sheet or use the background upload queue."
+
+        embed.add_field(
+            name="ℹ️ Legend & Notes",
+            value=legend,
+            inline=False
+        )
+
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        # Auto-delete after 60 seconds to keep chat clean
+        response = await interaction.original_response()
+        asyncio.create_task(self._delete_after_delay(response, 60))
 
     async def _delete_after_delay(self, message, delay: int):
         """Delete a message after a delay"""
