@@ -1,8 +1,10 @@
 # Session State - Automation Implementation
 
-**Last Updated**: 2025-12-15
-**Current Status**: ⏸️ **PAUSED - Awaiting ASN Bank Legal Clarification**
-**Previous Session**: Build Session 1 - Bank Scraper & API Foundation (Browsercode Auth)
+**Last Updated**: 2025-12-16
+**Current Status**: ✅ **Session 2 Complete - AI Categorization Ready**
+**Previous Sessions**:
+- Session 1: Bank Scraper & API Foundation (Browsercode Auth) - ⏸️ PAUSED
+- Session 2: AI Categorization - ✅ COMPLETE
 
 ## Quick Resume
 
@@ -68,7 +70,37 @@ If continuing this work on another device or after a break:
 - ✅ Authentication via `X-API-Key` header
 - ✅ Session storage in `data/bank_session.json`
 
-### ⏸️ Paused - Awaiting Legal Clarification
+### ✅ Completed - Session 2: AI Categorization (2025-12-16)
+
+**What's Done**:
+- ✅ Enabled `anthropic>=0.8.0` in requirements.txt
+- ✅ Created `src/automation/ai_categorizer.py` - Claude API integration
+  - Uses Claude 3.5 Haiku for cost efficiency (~$0.09/month)
+  - Structured JSON responses with confidence scoring
+  - Comprehensive prompt engineering with Dutch household budget context
+- ✅ Created `src/finance_core/categorization_engine.py` - Unified categorization
+  - Regex-first approach (confidence = 1.0)
+  - AI fallback for unmatched transactions (confidence = 0.0-1.0)
+  - Configurable confidence threshold (default: 0.75)
+  - Batch categorization support
+- ✅ Created `scripts/test_ai_categorization.py` - Test suite
+  - Tests regex-only mode
+  - Tests AI categorization
+  - Tests unified engine (regex → AI pipeline)
+  - Provides batch statistics
+
+**Benefits**:
+- 📈 Expected to auto-categorize 45-55% more transactions (AI coverage)
+- 💰 Cost-efficient: ~$0.09/month for 100 AI categorizations
+- 🎯 High confidence threshold ensures quality
+- 🔄 Seamless integration with existing regex rules
+
+**Configuration Ready**:
+- `CLAUDE_API_KEY` - Environment variable for API key
+- `AI_CATEGORIZATION_ENABLED` - Toggle AI on/off (default: False)
+- `AI_CONFIDENCE_THRESHOLD` - Auto-approval threshold (default: 0.75)
+
+### ⏸️ Paused - Session 1: Bank Scraper (Awaiting Legal Clarification)
 
 **Reason**: Checking with ASN Bank if Playwright automation is legally allowed
 
@@ -89,32 +121,28 @@ If continuing this work on another device or after a break:
 - 📄 See `BROWSERCODE_STATUS.md` for complete status and technical details
 - 📄 See `AUTOMATION_PLAN.md` for original browsercode strategy
 
-**Next Actions**:
-1. ⏳ Wait for ASN Bank response
-2. If approved → Continue with transaction download implementation
-3. If not approved → Remove automation code, explore official APIs
-4. If uncertain → Pivot to other parts of the project
+### 📋 Pending (Session 3+)
 
-### ⚠️ In Progress (Before Pause)
+**Session 3: Discord Approval UI** (READY TO START)
+- Create pending transaction queue (`src/finance_core/pending_transactions.py`)
+- Add Discord approval buttons with AI suggestions
+- Create Discord notifier for approval requests
+- Integrate with AI categorization engine
+- Estimated time: 2-3 hours
 
-**Converting from QR Login to Browsercode**:
-- **Why**: QR codes refresh every 4-5 seconds (not automatable)
-- **Solution**: Browsercode = 5-digit PIN, one-time setup, then fully automated
-- **Details**: See `AUTOMATION_PLAN.md`
+**Session 4: Orchestration & Integration**
+- Create main automation orchestrator
+- Wire together: scraper → categorization → Discord/Sheets
+- Implement deduplication logic
+- Add API endpoints for full workflow
+- Estimated time: 2 hours
 
-**Next Tasks**:
-1. Add `login_with_browsercode()` method to `bank_scraper.py`
-2. Add `ASN_BROWSERCODE` config to `config_settings.py`
-3. Update `/api/login` endpoint to call browsercode login
-4. Test browsercode flow end-to-end
-5. Update selectors after inspecting ASN Bank login page
-
-### 📋 Pending (Session 2+)
-
-- Session 2: AI Categorization with Claude API
-- Session 3: Discord Approval UI
-- Session 4: Orchestration & Integration
-- Session 5: n8n Scheduling
+**Session 5: n8n Scheduling**
+- Set up daily cron workflow
+- Configure webhooks for approvals
+- Add error handling and notifications
+- Test end-to-end automation
+- Estimated time: 30 minutes
 
 ## Key Files Reference
 

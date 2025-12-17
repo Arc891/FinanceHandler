@@ -84,13 +84,7 @@ data/browser_profile/
 *.xls
 transactie-historie*.csv
 
-# Legacy directories (in case they exist)
-uploads/
-sessions/
-src/uploads/
-src/sessions/
-src/data/uploads/
-src/sessions/
+# Legacy session files
 *.session
 
 # Logs
@@ -137,3 +131,5 @@ Thumbs.db
 !.env.example
 !config_settings.example.py
 !src/config/google_service_account.example.json
+
+/[A-Z_]*.md
