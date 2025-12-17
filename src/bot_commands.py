@@ -237,6 +237,35 @@ class FinanceBot(commands.Cog):
         response = await interaction.original_response()
         asyncio.create_task(self._delete_after_delay(response, 60))
 
+    @app_commands.command(name="sort", description="Sort all transactions in Google Sheets by date")
+    async def sort_sheet(self, interaction: discord.Interaction):
+        """Manually trigger sorting of all transactions in Google Sheets by date"""
+        await interaction.response.send_message("📊 Sorting transactions by date...", ephemeral=True)
+
+        try:
+            from finance_core.google_sheets import sort_google_sheet_transactions
+
+            # Run sort in executor to not block event loop
+            loop = asyncio.get_event_loop()
+            expense_sorted, income_sorted = await loop.run_in_executor(
+                None, sort_google_sheet_transactions
+            )
+
+            result_msg = f"✅ Sort complete!\n"
+            result_msg += f"📊 Sorted {expense_sorted} expense rows and {income_sorted} income rows by date."
+
+            await interaction.edit_original_response(content=result_msg)
+            # Auto-delete after 10 seconds
+            response = await interaction.original_response()
+            asyncio.create_task(self._delete_after_delay(response, 10))
+
+        except Exception as e:
+            logger.error(f"Error sorting sheet: {e}", exc_info=True)
+            await interaction.edit_original_response(content=f"❌ Error sorting sheet: {str(e)}")
+            # Auto-delete after 10 seconds
+            response = await interaction.original_response()
+            asyncio.create_task(self._delete_after_delay(response, 10))
+
     async def _delete_after_delay(self, message, delay: int):
         """Delete a message after a delay"""
         await asyncio.sleep(delay)

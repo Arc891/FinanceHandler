@@ -75,6 +75,7 @@ class IncomeCategory(str, Enum):
 # ─────────────────────────────────────────────────────────────────────────────
 
 CATEGORIZATION_RULES_EXPENSE = {
+    # Abonnementen
     r"gebruik betaalrekening":         ("ASN Gebruikskosten", ExpenseCategory.ABONNEMENTEN),
     r"maandelijkse bijdrage familie":  ("{c} uitjes",   ExpenseCategory.ABONNEMENTEN),
     r"Apple opslag en app pomodoro":   ("{c} Janneke",  ExpenseCategory.ABONNEMENTEN),
@@ -82,24 +83,60 @@ CATEGORIZATION_RULES_EXPENSE = {
     r"consumentenbond|ANWB":           ("{c}", ExpenseCategory.ABONNEMENTEN),
     r"lensplaza":                      ("Lenzen Janneke",  ExpenseCategory.ABONNEMENTEN),
     r"ODIDO":                          ("{c} Internet/TV", ExpenseCategory.ABONNEMENTEN),
+
+    # Ander
     r"Kuario":                         ("Printen Bieb Driebergen", ExpenseCategory.ANDER),
+
+    # Auto / vervoer / OV
     r"TinQ|Tango":                     ("{c} tanken", ExpenseCategory.AUTO_VERVOER_OV),
     r"Greenwheels":                    ("{c} auto",   ExpenseCategory.AUTO_VERVOER_OV),
     r"ovpay|NS GROEP":                 ("{c} OV kosten", ExpenseCategory.AUTO_VERVOER_OV),
-    r"JUMBO|PICNIC|LIDL|AH to go|ALBERT HEIJN|VOMAR|PLUS|Fruitcompany": ("{c} inkopen", ExpenseCategory.BOODSCHAPPEN),
+
+    # Boodschappen
+    r"JUMBO|PICNIC|LIDL|AH to go|ALBERT HEIJN|VOMAR|PLUS|Fruitcompany|Odin|Lakerveld": ("{c} inkopen", ExpenseCategory.BOODSCHAPPEN),
+    r"Ararat":                         ("{c} groente/fruit", ExpenseCategory.BOODSCHAPPEN),
+    r"Vigola":                         ("{c} delicatessen", ExpenseCategory.BOODSCHAPPEN),
+
+    # Dates/uitjes
     r"snack company|snackbar traay":   ("{c} eten", ExpenseCategory.DATES_UITJES),
+
+    # Gas/water/electra
     r"vitens":                         ("{c} water", ExpenseCategory.GAS_WATER_ELECTRA),
     r"ENGIE":                          ("{c} energie", ExpenseCategory.GAS_WATER_ELECTRA),
+
+    # Goeie doelen - specific charities (more reliable than generic pattern)
     r"sponsorbijdrage":                ("Compassion Midina", ExpenseCategory.GOEIE_DOELEN),
-    r"(?i)(?=.*\b(?:donatie|gift|bijdrage)\b).*?\W ([A-Za-z0-9 &\-\.]+)$": ("Donatie/bijdrage aan {c}", ExpenseCategory.GOEIE_DOELEN),
+    r"Kinderen Kankervrij|KiKa":       ("Donatie {c}", ExpenseCategory.GOEIE_DOELEN),
+    r"Jesus in the Streets":           ("Donatie {c}", ExpenseCategory.GOEIE_DOELEN),
+    r"Utrechts Landschap":             ("Donatie {c}", ExpenseCategory.GOEIE_DOELEN),
+    r"NEDERLANDS BIJBELGENOOTSCHAP":   ("Donatie {c}", ExpenseCategory.GOEIE_DOELEN),
+    r"Zij Lacht":                      ("Donatie {c}", ExpenseCategory.GOEIE_DOELEN),
+    r"World Vision|Wereldvisie":       ("Donatie {c}", ExpenseCategory.GOEIE_DOELEN),
+    r"Rode Kruis":                     ("Donatie {c}", ExpenseCategory.GOEIE_DOELEN),
+    r"Natuurmonumenten":               ("Donatie {c}", ExpenseCategory.GOEIE_DOELEN),
+    r"GoFundMe":                       ("Donatie via {c}", ExpenseCategory.GOEIE_DOELEN),
+
+    # Huishouden
     r"Kantoor der Kerkelijke Goederen": ("Huur {c}", ExpenseCategory.HUISHOUDEN),
-    r"maandelijks spaargeld - (\w+)":  ("Sparen - {c}", ExpenseCategory.NAAR_SPAARPOTJES),
+
+    # Naar spaarpotjes
+    r"maandelijks spaargeld\s*[-]?\s*(\w+)": ("Sparen - {c}", ExpenseCategory.NAAR_SPAARPOTJES),
+
+    # Persoonlijk vrij geld
     r"vrij geld (\w+)":                ("Vrij geld {c}", ExpenseCategory.PERSOONLIJK_VRIJ_GELD),
+
+    # Rekeningen
     r"Bolhaar":                        ("{c} zorgkosten", ExpenseCategory.REKENINGEN),
+    r"zorgkostennota":                 ("Zorgkosten terugbetaling", ExpenseCategory.REKENINGEN),
+
+    # Snacken
     r"Huiskamer":                      ("{c} snackje", ExpenseCategory.SNACKEN),
+
+    # Verzekeringen
     r"(\w+) PROMOVENDUM":              ("Promovendum {c}", ExpenseCategory.VERZEKERINGEN),
-    r"zorgkostennota":                 ("Zorgkosten terugbetaling", ExpenseCategory.ZORGVERZEKERING),
-    r"zilveren kruis|de christelijke zorg": ("{c} zorgverzekering",      ExpenseCategory.ZORGVERZEKERING),
+
+    # Zorgverzekering
+    r"zilveren kruis|de christelijke zorg": ("{c} zorgverzekering", ExpenseCategory.ZORGVERZEKERING),
 }
 
 CATEGORIZATION_RULES_INCOME = {
@@ -107,4 +144,5 @@ CATEGORIZATION_RULES_INCOME = {
     r"SALARIS":              ("{c} Ezra",      IncomeCategory.SALARIS),
     r"BONUS":                ("{c} bonus",     IncomeCategory.BONUS),
     r"GEMEENTE":             ("{c} uitkering", IncomeCategory.GEMEENTE),
+    r"zorgkostennota":       ("Zorgkosten terugbetaling", IncomeCategory.PERSONLIJKE_REKENING),
 }

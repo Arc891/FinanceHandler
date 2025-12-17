@@ -620,3 +620,85 @@ def clear_failed_transactions_after_retry(user_id: int):
     """
     queue = get_upload_queue()
     queue.clear_failed_transactions_after_retry(user_id)
+
+
+def sort_sheet_after_uploads(timeout: float = 60.0) -> bool:
+    """
+    Wait for the upload queue to empty, then sort the Google Sheet by date.
+
+    This should be called after queueing a batch of transactions to ensure
+    the sheet is sorted once all uploads are complete.
+
+    Args:
+        timeout: Maximum time to wait for queue to empty (in seconds)
+
+    Returns:
+        True if sort was successful, False otherwise
+    """
+    queue = get_upload_queue()
+
+    try:
+        # Wait for queue to be empty (with timeout)
+        start_time = time.time()
+        while not queue.upload_queue.empty():
+            if time.time() - start_time > timeout:
+                logger.warning(f"⚠️ Timeout waiting for upload queue to empty after {timeout}s")
+                return False
+            time.sleep(0.5)
+
+        # Small delay to ensure last upload is fully processed
+        time.sleep(1.0)
+
+        # Now sort the sheet
+        from finance_core.google_sheets import sort_google_sheet_transactions
+        expense_sorted, income_sorted = sort_google_sheet_transactions()
+
+        logger.info(f"✅ Sheet sorted after uploads: {expense_sorted} expenses, {income_sorted} income")
+        return True
+
+    except Exception as e:
+        logger.error(f"❌ Error sorting sheet after uploads: {e}")
+        return False
+
+
+async def sort_sheet_after_uploads_async(timeout: float = 60.0) -> bool:
+    """
+    Async version: Wait for the upload queue to empty, then sort the Google Sheet.
+
+    This is designed to be called from async Discord bot code without blocking.
+
+    Args:
+        timeout: Maximum time to wait for queue to empty (in seconds)
+
+    Returns:
+        True if sort was successful, False otherwise
+    """
+    import asyncio
+
+    queue = get_upload_queue()
+
+    try:
+        # Wait for queue to be empty (with timeout) - async sleep to not block event loop
+        start_time = time.time()
+        while not queue.upload_queue.empty():
+            if time.time() - start_time > timeout:
+                logger.warning(f"⚠️ Timeout waiting for upload queue to empty after {timeout}s")
+                return False
+            await asyncio.sleep(0.5)
+
+        # Small delay to ensure last upload is fully processed
+        await asyncio.sleep(1.0)
+
+        # Now sort the sheet (run in executor to not block event loop)
+        loop = asyncio.get_event_loop()
+        from finance_core.google_sheets import sort_google_sheet_transactions
+        expense_sorted, income_sorted = await loop.run_in_executor(
+            None, sort_google_sheet_transactions
+        )
+
+        logger.info(f"✅ Sheet sorted after uploads: {expense_sorted} expenses, {income_sorted} income")
+        return True
+
+    except Exception as e:
+        logger.error(f"❌ Error sorting sheet after uploads: {e}")
+        return False

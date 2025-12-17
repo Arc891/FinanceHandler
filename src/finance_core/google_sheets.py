@@ -225,10 +225,144 @@ class GoogleSheetsExporter:
             
             logger.info(f"🎉 Successfully exported {len(expense_values)} expenses and {len(income_values)} incomes to Google Sheets")
             return len(expense_values), len(income_values)
-            
+
         except Exception as e:
             logger.error(f"❌ Error writing to Google Sheets: {str(e)}")
             raise
+
+    def sort_transactions_by_date(self, sort_expenses: bool = True, sort_income: bool = True) -> Tuple[int, int]:
+        """
+        Sort expense and income transactions by date (column B for expenses, column G for income).
+        Uses Python date parsing to ensure proper chronological order (not lexicographic).
+
+        Args:
+            sort_expenses: Whether to sort expense transactions (columns B-E)
+            sort_income: Whether to sort income transactions (columns G-J)
+
+        Returns:
+            Tuple of (expense_rows_sorted, income_rows_sorted)
+        """
+        import re
+        from datetime import datetime
+
+        date_pattern = re.compile(r'^\d{1,2}-\d{1,2}-\d{4}$')  # DD-MM-YYYY format
+
+        def parse_date(date_str: str) -> datetime:
+            """Parse DD-MM-YYYY date string to datetime for proper sorting."""
+            try:
+                return datetime.strptime(date_str.strip(), "%d-%m-%Y")
+            except (ValueError, AttributeError):
+                return datetime(1970, 1, 1)  # Fallback for invalid dates
+
+        def find_and_sort_data(values: List[List[Any]], start_offset: int = 1) -> Tuple[int, int, List[List[Any]]]:
+            """
+            Find rows with date data, sort them chronologically, return range and sorted data.
+            Returns (first_row, last_row, sorted_data) where rows are 1-based sheet row numbers.
+            """
+            # Find rows that contain date data
+            data_rows = []
+            first_data_row = None
+            last_data_row = None
+
+            for i, row in enumerate(values):
+                if row and len(row) > 0 and row[0]:
+                    cell_value = str(row[0]).strip()
+                    if date_pattern.match(cell_value):
+                        actual_row = i + start_offset
+                        if first_data_row is None:
+                            first_data_row = actual_row
+                        last_data_row = actual_row
+                        # Pad row to 4 columns if needed
+                        padded_row = row + [''] * (4 - len(row)) if len(row) < 4 else row[:4]
+                        data_rows.append(padded_row)
+
+            if not data_rows or len(data_rows) <= 1:
+                return first_data_row, last_data_row, []
+
+            # Sort by date (first column) chronologically
+            sorted_data = sorted(data_rows, key=lambda r: parse_date(str(r[0])))
+
+            return first_data_row, last_data_row, sorted_data
+
+        try:
+            sheet = self._get_worksheet()
+            expense_sorted = 0
+            income_sorted = 0
+
+            if sort_expenses:
+                # Get expense data (columns B-E)
+                expense_values = sheet.get('B1:E500')
+                if expense_values:
+                    first_row, last_row, sorted_data = find_and_sort_data(expense_values, start_offset=1)
+
+                    if sorted_data and len(sorted_data) > 1:
+                        sort_range = f"B{first_row}:E{last_row}"
+                        logger.info(f"📊 Sorting {len(sorted_data)} expenses in range {sort_range} chronologically...")
+
+                        # Write sorted data back to sheet
+                        sheet.update(sorted_data, sort_range)
+                        expense_sorted = len(sorted_data)
+                        logger.info(f"✅ Sorted {expense_sorted} expense rows by date")
+                    elif first_row == last_row:
+                        logger.info("📊 Only one expense row found, no sorting needed")
+                    else:
+                        logger.info("📊 No expense data rows found to sort")
+
+            if sort_income:
+                # Get income data (columns G-J)
+                income_values = sheet.get('G1:J500')
+                if income_values:
+                    first_row, last_row, sorted_data = find_and_sort_data(income_values, start_offset=1)
+
+                    if sorted_data and len(sorted_data) > 1:
+                        sort_range = f"G{first_row}:J{last_row}"
+                        logger.info(f"📊 Sorting {len(sorted_data)} income in range {sort_range} chronologically...")
+
+                        # Write sorted data back to sheet
+                        sheet.update(sorted_data, sort_range)
+                        income_sorted = len(sorted_data)
+                        logger.info(f"✅ Sorted {income_sorted} income rows by date")
+                    elif first_row == last_row:
+                        logger.info("📊 Only one income row found, no sorting needed")
+                    else:
+                        logger.info("📊 No income data rows found to sort")
+
+            logger.info(f"🎉 Sort complete: {expense_sorted} expenses, {income_sorted} income rows")
+            return expense_sorted, income_sorted
+
+        except Exception as e:
+            logger.error(f"❌ Error sorting transactions: {str(e)}")
+            raise
+
+
+def sort_google_sheet_transactions(
+    credentials_path: Optional[str] = None,
+    sort_expenses: bool = True,
+    sort_income: bool = True
+) -> Tuple[int, int]:
+    """
+    Convenience function to sort transactions in Google Sheets by date.
+
+    Args:
+        credentials_path: Path to Google service account credentials file
+        sort_expenses: Whether to sort expense transactions
+        sort_income: Whether to sort income transactions
+
+    Returns:
+        Tuple of (expense_rows_sorted, income_rows_sorted)
+    """
+    if credentials_path is None:
+        try:
+            from config.config_settings import GOOGLE_CREDENTIALS_PATH
+            credentials_path = GOOGLE_CREDENTIALS_PATH
+        except ImportError:
+            # Fallback to default path
+            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            credentials_path = os.path.join(base_dir, "config", "google_service_account.json")
+
+    exporter = GoogleSheetsExporter(credentials_path)
+    return exporter.sort_transactions_by_date(sort_expenses, sort_income)
+
 
 def export_to_google_sheets(
     income_transactions: List[Dict[str, Any]], 

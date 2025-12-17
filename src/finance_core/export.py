@@ -154,11 +154,18 @@ async def process_csv_file(file_path: Optional[str], ctx_or_interaction: Union[d
         await send_message(ctx_or_interaction, f"❌ Error during categorization: {e}\nPartial progress saved. Use `/resume` to continue.", ephemeral=True)
         raise  # Re-raise to let caller handle
 
-    # Save session: manual-review in remaining, auto-categorized in income/expenses
-    save_session(user_id, manual_needed, auto_income, auto_expenses)
+    # Upload auto-categorized transactions IMMEDIATELY (don't wait for manual review)
+    total_auto = auto_categorized_count["regex"] + auto_categorized_count["ai"]
+
+    if auto_income or auto_expenses:
+        logger.info(f"Uploading {len(auto_income)} income + {len(auto_expenses)} expenses immediately")
+        await _upload_auto_categorized(user_id, auto_income, auto_expenses, ctx_or_interaction)
+
+    # Save session with ONLY manual-needed transactions (auto ones are already uploaded)
+    # Clear income/expenses since they're uploaded
+    save_session(user_id, manual_needed, [], [])
 
     # Show summary message
-    total_auto = auto_categorized_count["regex"] + auto_categorized_count["ai"]
     summary = f"✅ Auto-categorized {total_auto}/{len(transactions)} transactions"
     if auto_categorized_count["regex"] > 0:
         summary += f" ({auto_categorized_count['regex']} regex"
@@ -170,16 +177,17 @@ async def process_csv_file(file_path: Optional[str], ctx_or_interaction: Union[d
     if total_auto > 0:
         summary += ")"
 
+    if total_auto > 0:
+        summary += f"\n📤 Uploaded {total_auto} auto-categorized transactions!"
+
     if manual_needed:
         summary += f"\n🔍 {len(manual_needed)} transaction{'s' if len(manual_needed) > 1 else ''} need manual review."
-        summary += f"\n\n📤 Auto-categorized will upload when manual review completes."
         if total_auto > 0:
             summary += f"\n💡 Use `/review` to check auto-categorizations."
     else:
         summary += "\n\n🎉 All transactions processed automatically!"
         if total_auto > 0:
             summary += f"\n💡 Use `/review` to check categorizations."
-        summary += f"\n\n📤 Uploading {len(auto_income) + len(auto_expenses)} transactions sorted by date..."
 
     # Log summary (in case Discord message fails)
     logger.info(f"Summary: {summary.replace(chr(10), ' ')}")
@@ -199,13 +207,6 @@ async def process_csv_file(file_path: Optional[str], ctx_or_interaction: Union[d
         logger.error(f"Failed to send summary message: {e}")
         # Continue anyway - upload and manual processing should still happen
 
-    # If no manual review needed, upload immediately
-    if not manual_needed:
-        logger.info(f"No manual review needed - uploading {len(auto_income) + len(auto_expenses)} auto-categorized transactions")
-        await _upload_sorted_transactions(user_id, ctx_or_interaction)
-    else:
-        logger.info(f"Manual review needed for {len(manual_needed)} transactions - deferring upload until completion")
-
     # Start manual processing if needed
     if manual_needed and isinstance(ctx_or_interaction, discord.Interaction):
         try:
@@ -223,36 +224,81 @@ async def process_csv_file(file_path: Optional[str], ctx_or_interaction: Union[d
         os.remove(file_path)
 
 
+async def _upload_auto_categorized(
+    user_id: int,
+    income_txs: list,
+    expense_txs: list,
+    ctx_or_interaction: Union[discord.Interaction, commands.Context],
+    trigger_sort: bool = True
+) -> None:
+    """Upload auto-categorized transactions immediately (sorted by date)."""
+    from datetime import datetime
+
+    if not income_txs and not expense_txs:
+        logger.info("No auto-categorized transactions to upload")
+        return
+
+    def parse_date(tx):
+        """Parse booking_date to datetime for sorting"""
+        date_str = tx.get("booking_date", "01-01-1970")
+        try:
+            return datetime.strptime(date_str, "%d-%m-%Y")
+        except:
+            return datetime(1970, 1, 1)
+
+    # Sort by date (oldest first) before queueing
+    income_sorted = sorted(income_txs, key=parse_date)
+    expenses_sorted = sorted(expense_txs, key=parse_date)
+
+    logger.info(f"Queueing {len(income_sorted)} income + {len(expenses_sorted)} expenses for upload")
+
+    try:
+        from finance_core.background_upload import queue_transaction_upload, sort_sheet_after_uploads_async
+
+        for tx in income_sorted:
+            queue_transaction_upload(tx, "income", user_id)
+
+        for tx in expenses_sorted:
+            queue_transaction_upload(tx, "expense", user_id)
+
+        logger.info(f"Successfully queued {len(income_sorted) + len(expenses_sorted)} auto-categorized transactions")
+
+        # Trigger sheet sort after uploads complete (runs in background)
+        if trigger_sort:
+            logger.info("Triggering sheet sort after uploads complete...")
+            await sort_sheet_after_uploads_async(timeout=120.0)
+
+    except Exception as e:
+        logger.error(f"Failed to queue auto-categorized transactions: {e}", exc_info=True)
+        raise
+
+
 async def _upload_sorted_transactions(user_id: int, ctx_or_interaction: Union[discord.Interaction, commands.Context]) -> None:
-    """Sort all categorized transactions by date and upload to Google Sheets"""
+    """Sort all categorized transactions by date and upload to Google Sheets (for manual review completion)"""
     from datetime import datetime
 
     # Load all categorized transactions from session
     _, income_txs, expense_txs = load_session(user_id)
 
     if not income_txs and not expense_txs:
-        logger.info("No transactions to upload")
+        logger.info("No transactions to upload from session")
         return
 
-    # Sort by booking_date (newest first for descending, oldest first for ascending)
     def parse_date(tx):
         """Parse booking_date to datetime for sorting"""
         date_str = tx.get("booking_date", "01-01-1970")
         try:
-            # ASN Bank format: DD-MM-YYYY
             return datetime.strptime(date_str, "%d-%m-%Y")
         except:
-            return datetime(1970, 1, 1)  # Fallback for invalid dates
+            return datetime(1970, 1, 1)
 
-    # Sort income and expenses separately by date (oldest first = ascending)
     income_sorted = sorted(income_txs, key=parse_date)
     expenses_sorted = sorted(expense_txs, key=parse_date)
 
     logger.info(f"Uploading {len(income_sorted)} income + {len(expenses_sorted)} expenses sorted by date")
 
-    # Queue for upload (background worker handles the actual upload)
     try:
-        from finance_core.background_upload import queue_transaction_upload
+        from finance_core.background_upload import queue_transaction_upload, sort_sheet_after_uploads_async
 
         for tx in income_sorted:
             queue_transaction_upload(tx, "income", user_id)
@@ -261,9 +307,19 @@ async def _upload_sorted_transactions(user_id: int, ctx_or_interaction: Union[di
             queue_transaction_upload(tx, "expense", user_id)
 
         upload_msg = f"📤 Uploaded {len(income_sorted) + len(expenses_sorted)} transactions sorted by date!"
-        await send_message(ctx_or_interaction, upload_msg, ephemeral=True)
+        try:
+            await send_message(ctx_or_interaction, upload_msg, ephemeral=True)
+        except:
+            pass  # Ignore message failures
+
+        # Trigger sheet sort after uploads complete
+        logger.info("Triggering sheet sort after manual review uploads...")
+        await sort_sheet_after_uploads_async(timeout=120.0)
 
     except Exception as e:
         logger.error(f"Failed to queue sorted transactions: {e}")
-        error_msg = f"❌ Error uploading transactions: {str(e)}"
-        await send_message(ctx_or_interaction, error_msg, ephemeral=True)
+        try:
+            error_msg = f"❌ Error uploading transactions: {str(e)}"
+            await send_message(ctx_or_interaction, error_msg, ephemeral=True)
+        except:
+            pass

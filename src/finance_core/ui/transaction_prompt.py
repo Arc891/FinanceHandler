@@ -332,20 +332,32 @@ class TransactionView(View):
                 logger.debug(f"Could not edit original message: {e}")
             await start_transaction_prompt(interaction, self.user_id)
         else:
-            # All manual transactions processed - trigger sorted upload
-            await interaction.response.send_message(
-                content=f"🎉 All {len(income) + len(expenses)} transactions processed! Uploading sorted by date...",
-                ephemeral=True
-            )
-            # Update the original message to disable buttons immediately
-            try:
-                await interaction.edit_original_response(view=self)
-            except Exception as e:
-                logger.debug(f"Could not edit original message: {e}")
+            # All manual transactions processed - upload the manually categorized ones
+            manual_count = len(income) + len(expenses)
 
-            # Upload all transactions sorted by date
-            from finance_core.export import _upload_sorted_transactions
-            await _upload_sorted_transactions(self.user_id, interaction)
+            if manual_count > 0:
+                await interaction.response.send_message(
+                    content=f"🎉 Manual review complete! Uploading {manual_count} transactions...",
+                    ephemeral=True
+                )
+                # Update the original message to disable buttons immediately
+                try:
+                    await interaction.edit_original_response(view=self)
+                except Exception as e:
+                    logger.debug(f"Could not edit original message: {e}")
+
+                # Upload manually categorized transactions
+                from finance_core.export import _upload_sorted_transactions
+                await _upload_sorted_transactions(self.user_id, interaction)
+            else:
+                await interaction.response.send_message(
+                    content=f"🎉 Manual review complete!",
+                    ephemeral=True
+                )
+                try:
+                    await interaction.edit_original_response(view=self)
+                except Exception as e:
+                    logger.debug(f"Could not edit original message: {e}")
 
             # Clear session after upload
             clear_session(self.user_id)

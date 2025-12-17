@@ -2,7 +2,37 @@
 
 ## Recent Changes
 
-### Data Directory Restructuring (Latest)
+### Auto-Upload Fix & Sorting Feature (2025-12-17)
+
+**Auto-Categorized Transaction Upload Fix**:
+- Fixed issue where auto-categorized transactions weren't uploading immediately
+- High-confidence transactions (regex + AI ≥75%) now upload to Google Sheets right away
+- Manual review transactions stored separately in session
+- Only manual-review transactions remain for user interaction
+
+**Chronological Sorting**:
+- Added `sort_transactions_by_date()` method to GoogleSheetsExporter
+- Uses Python date parsing for proper DD-MM-YYYY chronological order (not lexicographic)
+- Auto-sorts sheet after batch uploads complete
+- New `/sort` slash command for manual sorting
+
+**New Regex Patterns**:
+- Boodschappen: Odin, Lakerveld, Ararat, Vigola (consolidated patterns)
+- Goeie Doelen: Specific charity names (KiKa, World Vision, Rode Kruis, etc.)
+- Income: zorgkostennota (health insurance refunds)
+
+**New Commands**:
+- `/sort` - Manually trigger chronological sorting of Google Sheets
+
+### AI Categorization & Auto-Upload (2025-12-16)
+
+- Integrated Claude 3.5 Haiku for AI-powered transaction categorization
+- Two-tier categorization: regex rules (100% confidence) → AI (0-100% confidence)
+- Auto-upload for high-confidence transactions (≥75%)
+- `/review` command to inspect auto-categorizations
+- Async Claude CLI integration for Docker deployments
+
+### Data Directory Restructuring
 
 - **Created Unified Data Directory**: Moved runtime data from mixed locations to `data/` directory
 - **Session Management Cleanup**: Moved sessions from `/sessions` and `/src/sessions` to `data/sessions/`
