@@ -30,6 +30,9 @@ RUN useradd --create-home --shell /bin/bash appuser && \
   chown -R appuser:appuser /app
 USER appuser
 
+# Set HOME for Claude CLI to find config
+ENV HOME=/home/appuser
+
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
   CMD python -c "import discord; print('OK')" || exit 1

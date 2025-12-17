@@ -284,30 +284,26 @@ class TransactionView(View):
             expenses.append(categorized_tx)
 
         save_session(self.user_id, remaining, income, expenses)
-        
-        # Queue transaction for immediate upload to Google Sheets
-        try:
-            from finance_core.background_upload import queue_transaction_upload
-            
-            # Check if this is a cached transaction being processed
-            if '_cache_id' in tx:
-                # This is a processed cached transaction - remove from cache
+
+        # Check if this is a cached transaction being processed
+        upload_indicator = ""
+        if '_cache_id' in tx:
+            # Cached transactions get uploaded immediately (replacement logic)
+            try:
+                from finance_core.background_upload import queue_transaction_upload
                 from finance_core.session_management import remove_cached_transaction
+
                 cache_id = tx['_cache_id']
                 remove_cached_transaction(self.user_id, cache_id)
-                
+
                 # Remove the cache marker before uploading
                 categorized_tx = {k: v for k, v in categorized_tx.items() if k != '_cache_id'}
                 queue_transaction_upload(categorized_tx, self.transaction_type, self.user_id)
                 upload_indicator = " 🔄📤"
                 logger.info(f"Processed cached transaction {cache_id}")
-            else:
-                # Regular transaction
-                queue_transaction_upload(categorized_tx, self.transaction_type, self.user_id)
-                upload_indicator = " 📤"
-        except Exception as e:
-            logger.error(f"❌ Failed to queue transaction for upload: {e}")
-            upload_indicator = ""
+            except Exception as e:
+                logger.error(f"❌ Failed to queue cached transaction for upload: {e}")
+        # Regular transactions: will be uploaded sorted when session completes
 
         # Disable all buttons and selects to prevent further interactions
         self.switch_type_button.disabled = True
@@ -326,7 +322,7 @@ class TransactionView(View):
         
         if remaining:
             await interaction.response.send_message(
-                content=f"✅ Categorized as {self.selected_category}{description_source}{smart_indicator}{upload_indicator} {progress_info}", 
+                content=f"✅ Categorized as {self.selected_category}{description_source}{smart_indicator}{upload_indicator} {progress_info}",
                 ephemeral=True
             )
             # Update the original message to disable buttons immediately
@@ -336,8 +332,9 @@ class TransactionView(View):
                 logger.debug(f"Could not edit original message: {e}")
             await start_transaction_prompt(interaction, self.user_id)
         else:
+            # All manual transactions processed - trigger sorted upload
             await interaction.response.send_message(
-                content=f"🎉 All {len(income) + len(expenses)} transactions processed{upload_indicator}!", 
+                content=f"🎉 All {len(income) + len(expenses)} transactions processed! Uploading sorted by date...",
                 ephemeral=True
             )
             # Update the original message to disable buttons immediately
@@ -345,8 +342,14 @@ class TransactionView(View):
                 await interaction.edit_original_response(view=self)
             except Exception as e:
                 logger.debug(f"Could not edit original message: {e}")
+
+            # Upload all transactions sorted by date
+            from finance_core.export import _upload_sorted_transactions
+            await _upload_sorted_transactions(self.user_id, interaction)
+
+            # Clear session after upload
             clear_session(self.user_id)
-            
+
             # Auto-delete completion message after 5 seconds
             asyncio.create_task(self._delete_response_after_delay(interaction, 5))
 

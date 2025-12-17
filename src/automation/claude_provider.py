@@ -11,15 +11,16 @@ This allows using Claude Code as a fallback to avoid API costs.
 import json
 import logging
 import subprocess
+import asyncio
 from typing import Optional, Dict, Any
 
 # Make anthropic optional - only needed if using API
 try:
-    from anthropic import Anthropic
+    from anthropic import AsyncAnthropic
     HAS_ANTHROPIC = True
 except ImportError:
     HAS_ANTHROPIC = False
-    Anthropic = None
+    AsyncAnthropic = None
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +55,7 @@ class ClaudeProvider:
                 logger.info("Install with: pip install anthropic")
             else:
                 logger.info("Using Anthropic API (requires credits)")
-                self.api_client = Anthropic(api_key=api_key)
+                self.api_client = AsyncAnthropic(api_key=api_key)
         else:
             logger.warning("No Claude access available - neither CLI nor API key")
 
@@ -75,7 +76,7 @@ class ClaudeProvider:
             logger.debug("Claude Code CLI not available")
             return False
 
-    def complete(self, prompt: str, max_tokens: int = 500, temperature: float = 0.3) -> str:
+    async def complete(self, prompt: str, max_tokens: int = 500, temperature: float = 0.3) -> str:
         """
         Get completion from Claude (CLI or API).
 
@@ -91,17 +92,17 @@ class ClaudeProvider:
             RuntimeError: If no Claude access available or request fails
         """
         if self.use_cli:
-            return self._complete_cli(prompt)
+            return await self._complete_cli(prompt)
         elif self.api_client:
-            return self._complete_api(prompt, max_tokens, temperature)
+            return await self._complete_api(prompt, max_tokens, temperature)
         else:
             raise RuntimeError(
                 "No Claude access available. Install Claude Code or provide API key."
             )
 
-    def _complete_cli(self, prompt: str) -> str:
+    async def _complete_cli(self, prompt: str) -> str:
         """
-        Complete using Claude Code CLI.
+        Complete using Claude Code CLI (async version).
 
         Note: First-time CLI usage may require interactive approval.
         Test manually first: claude -p "test prompt"
@@ -116,20 +117,43 @@ class ClaudeProvider:
 
             logger.debug(f"Calling Claude Code CLI with model: {self.model}")
 
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=180  # 3 minutes max (first request may be slow)
+            # Use async subprocess to avoid blocking Discord bot
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
             )
 
-            if result.returncode != 0:
-                error_msg = result.stderr or "Unknown error"
+            # Wait for completion with timeout
+            try:
+                stdout, stderr = await asyncio.wait_for(
+                    process.communicate(),
+                    timeout=180  # 3 minutes max (first request may be slow)
+                )
+            except asyncio.TimeoutError:
+                process.kill()
+                await process.wait()
+                logger.error(
+                    "Claude Code CLI timeout (180s). "
+                    "First-time use may require manual approval. "
+                    "Try: claude -p 'test' manually first."
+                )
+                raise RuntimeError(
+                    "Claude Code CLI timed out. "
+                    "If this is your first time, run 'claude -p \"test\"' manually to initialize."
+                )
+
+            # Decode output
+            stdout_str = stdout.decode('utf-8') if stdout else ""
+            stderr_str = stderr.decode('utf-8') if stderr else ""
+
+            if process.returncode != 0:
+                error_msg = stderr_str or "Unknown error"
                 logger.error(f"Claude Code CLI error: {error_msg}")
                 raise RuntimeError(f"Claude Code CLI failed: {error_msg}")
 
             # Parse JSON response
-            response = json.loads(result.stdout)
+            response = json.loads(stdout_str)
 
             if response.get("is_error"):
                 raise RuntimeError(f"Claude Code error: {response.get('result')}")
@@ -146,16 +170,6 @@ class ClaudeProvider:
 
             return response_text
 
-        except subprocess.TimeoutExpired:
-            logger.error(
-                "Claude Code CLI timeout (180s). "
-                "First-time use may require manual approval. "
-                "Try: claude -p 'test' manually first."
-            )
-            raise RuntimeError(
-                "Claude Code CLI timed out. "
-                "If this is your first time, run 'claude -p \"test\"' manually to initialize."
-            )
         except json.JSONDecodeError as e:
             logger.error(f"Failed to parse CLI response: {e}")
             raise RuntimeError("Invalid JSON response from Claude Code CLI")
@@ -163,8 +177,8 @@ class ClaudeProvider:
             logger.error(f"CLI completion failed: {e}")
             raise
 
-    def _complete_api(self, prompt: str, max_tokens: int, temperature: float) -> str:
-        """Complete using Anthropic API."""
+    async def _complete_api(self, prompt: str, max_tokens: int, temperature: float) -> str:
+        """Complete using Anthropic API (async version)."""
         try:
             # Map model alias to full API model name
             model_map = {
@@ -176,7 +190,8 @@ class ClaudeProvider:
 
             logger.debug(f"Calling Anthropic API with model: {api_model}")
 
-            response = self.api_client.messages.create(
+            # Use async API client
+            response = await self.api_client.messages.create(
                 model=api_model,
                 max_tokens=max_tokens,
                 temperature=temperature,

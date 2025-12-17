@@ -79,15 +79,24 @@ else
     exit 1
 fi
 
+# Determine actual user's home (not root when using sudo)
+ACTUAL_USER_HOME="${SUDO_USER:+/home/$SUDO_USER}"
+ACTUAL_USER_HOME="${ACTUAL_USER_HOME:-$HOME}"
+
 # Set up Docker run arguments for the bot
 DOCKER_RUN_ARGS=(
     # Mount volumes for persistent data
     -v "$(pwd)/data:/app/data"
     -v "$(pwd)/config:/app/config"
-    
+
+    # Mount Claude Code CLI for AI categorization
+    # Executable is read-only, config needs write access for logs/cache
+    -v "$ACTUAL_USER_HOME/.local/bin/claude:/usr/local/bin/claude:ro"
+    -v "$ACTUAL_USER_HOME/.claude:/home/appuser/.claude"
+
     # Set restart policy
     --restart "unless-stopped"
-    
+
     # Add labels for easier management
     --label "project=finance-automation"
     --label "type=discord-bot"

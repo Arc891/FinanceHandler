@@ -65,7 +65,7 @@ class CategorizationEngine:
             f"AI: {self.ai_enabled}, Threshold: {ai_confidence_threshold}"
         )
 
-    def categorize(self, transaction: Dict[str, Any]) -> CategorizationResult:
+    async def categorize(self, transaction: Dict[str, Any]) -> CategorizationResult:
         """
         Categorize a transaction using regex → AI pipeline.
 
@@ -94,7 +94,7 @@ class CategorizationEngine:
 
         # Step 2: Try AI categorization (if enabled)
         if self.ai_enabled and self.ai_categorizer:
-            return self._apply_ai_categorization(transaction)
+            return await self._apply_ai_categorization(transaction)
 
         # Step 3: No categorization available
         logger.info("No categorization match found (regex failed, AI disabled)")
@@ -122,11 +122,11 @@ class CategorizationEngine:
             logger.error(f"Error applying regex rules: {e}")
             return None, None
 
-    def _apply_ai_categorization(
+    async def _apply_ai_categorization(
         self, transaction: Dict[str, Any]
     ) -> CategorizationResult:
         """
-        Apply AI categorization using Claude API.
+        Apply AI categorization using Claude API (async version).
 
         Returns CategorizationResult with AI predictions and confidence.
         """
@@ -151,8 +151,8 @@ class CategorizationEngine:
             rules = CATEGORIZATION_RULES_INCOME if is_income else CATEGORIZATION_RULES_EXPENSE
             example_rules = get_example_rules_for_ai(rules)
 
-            # Call AI categorizer
-            category, description, confidence = self.ai_categorizer.categorize_transaction(
+            # Call AI categorizer (async to avoid blocking Discord bot)
+            category, description, confidence = await self.ai_categorizer.categorize_transaction(
                 transaction=transaction,
                 expense_categories=expense_categories,
                 income_categories=income_categories,
@@ -198,11 +198,11 @@ class CategorizationEngine:
                 method='none'
             )
 
-    def batch_categorize(
+    async def batch_categorize(
         self, transactions: list[Dict[str, Any]]
     ) -> list[CategorizationResult]:
         """
-        Categorize a batch of transactions.
+        Categorize a batch of transactions (async version).
 
         Args:
             transactions: List of transaction dicts
@@ -212,7 +212,7 @@ class CategorizationEngine:
         """
         results = []
         for tx in transactions:
-            result = self.categorize(tx)
+            result = await self.categorize(tx)
             results.append(result)
 
         # Log batch statistics

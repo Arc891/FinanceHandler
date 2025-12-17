@@ -47,7 +47,7 @@ class ClaudeCategorizer:
                 "No Claude access available. Install Claude Code or set CLAUDE_API_KEY."
             )
 
-    def categorize_transaction(
+    async def categorize_transaction(
         self,
         transaction: Dict[str, Any],
         expense_categories: Dict[str, str],
@@ -119,8 +119,8 @@ class ClaudeCategorizer:
         )
 
         try:
-            # Call Claude (CLI or API)
-            response_text = self.provider.complete(
+            # Call Claude (CLI or API) - async to avoid blocking Discord bot
+            response_text = await self.provider.complete(
                 prompt=prompt,
                 max_tokens=500,
                 temperature=0.3  # Lower temperature for more consistent categorization
