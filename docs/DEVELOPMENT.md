@@ -50,29 +50,81 @@ chmod +x setup.sh
 ```txt
 FinanceAutomation/
 ├── .github/workflows/       # GitHub Actions CI/CD
+├── .pre-commit-config.yaml  # Pre-commit hooks configuration
 ├── src/                     # Source code
 │   ├── bot.py              # Main bot entry point
 │   ├── bot_commands.py     # Discord slash commands
-│   ├── config_settings.py  # Configuration
 │   ├── constants.py        # Categories and rules
-│   ├── finance_core/       # Core business logic
-│   │   ├── csv_helper.py   # CSV parsing utilities
-│   │   ├── export.py       # Export functionality
-│   │   ├── google_sheets.py # Google Sheets integration
-│   │   ├── session_management.py # Session persistence
-│   │   └── ui/             # Discord UI components
-│   │       └── transaction_prompt.py # Transaction categorization UI
-│   └── config/             # Configuration files
-│       ├── google_service_account.json # Google API credentials (not in git)
-│       └── spaarpot_uuid_map.py # Savings account mapping
+│   ├── config/             # Configuration files
+│   │   ├── config_settings.py      # Main configuration
+│   │   ├── google_service_account.json # Google API credentials (not in git)
+│   │   └── spaarpot_uuid_map.py    # Savings account mapping
+│   ├── automation/         # Bank automation & AI (Session 1-2)
+│   │   ├── bank_scraper.py         # Playwright scraper for ASN Bank
+│   │   ├── ai_categorizer.py       # Claude API integration
+│   │   ├── claude_provider.py      # Claude CLI/API abstraction
+│   │   └── data_anonymizer.py      # PII removal before AI calls
+│   ├── api/                # HTTP API for n8n integration
+│   │   └── automation_endpoints.py # FastAPI endpoints
+│   └── finance_core/       # Core business logic
+│       ├── csv_helper.py           # CSV parsing utilities
+│       ├── export.py               # Export/processing coordinator
+│       ├── google_sheets.py        # Google Sheets integration
+│       ├── session_management.py   # Session persistence
+│       ├── background_upload.py    # Async upload queue
+│       ├── categorization_engine.py # Unified regex + AI logic
+│       ├── pending_transactions.py # Pending approval queue
+│       └── ui/             # Discord UI components
+│           ├── transaction_prompt.py      # Transaction categorization UI
+│           ├── discord_notifier.py        # Approval request sender
+│           └── cached_transactions_view.py # Cached transactions UI
 ├── data/                   # Runtime data (auto-created)
 │   ├── sessions/           # User session files
-│   └── uploads/            # Uploaded CSV files
+│   ├── uploads/            # Uploaded CSV files
+│   └── pending_approvals.json # Transactions awaiting approval
+├── docs/                   # Documentation
+│   └── automation/         # Automation-specific docs
+├── scripts/                # Utility scripts
+│   └── setup.sh            # Development setup script
 ├── requirements.txt        # Python dependencies
-├── .gitignore             # Git ignore rules
-├── setup.sh               # Development setup script
-├── LICENSE                # MIT License
-└── README.md              # Project documentation
+├── run.sh                  # Docker deployment script
+└── README.md               # Project documentation
+```
+
+## Pre-commit Hooks
+
+This project uses [pre-commit](https://pre-commit.com/) for automated code quality checks.
+
+### Setup
+
+```bash
+pip install pre-commit
+pre-commit install
+```
+
+### What Gets Checked
+
+On every commit:
+- **flake8**: Critical Python errors (syntax, undefined names)
+- **trailing-whitespace**: Removes trailing whitespace
+- **end-of-file-fixer**: Ensures files end with newline
+- **check-yaml/json**: Validates YAML and JSON files
+- **detect-private-key**: Prevents accidental key commits
+
+### Running Manually
+
+```bash
+# Run on all files
+pre-commit run --all-files
+
+# Run specific hook
+pre-commit run flake8 --all-files
+```
+
+### Skipping Hooks (Emergency Only)
+
+```bash
+git commit --no-verify -m "message"
 ```
 
 ## Code Style
