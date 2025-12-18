@@ -39,9 +39,11 @@ class ClaudeCategorizer:
         self.model = model
 
         if self.provider.use_cli:
-            logger.info(f"Initialized ClaudeCategorizer with Claude Code CLI (model: {model})")
+            logger.info(
+                f"Initialized ClaudeCategorizer with Claude Code CLI (model: {model})")
         elif self.provider.api_client:
-            logger.info(f"Initialized ClaudeCategorizer with Anthropic API (model: {model})")
+            logger.info(
+                f"Initialized ClaudeCategorizer with Anthropic API (model: {model})")
         else:
             raise ValueError(
                 "No Claude access available. Install Claude Code or set CLAUDE_API_KEY."
@@ -95,9 +97,13 @@ class ClaudeCategorizer:
 
         is_expense = amount_value < 0
         if is_expense:
-            counterparty_orig = transaction.get('creditor', {}).get('name', 'Unknown')
+            counterparty_orig = transaction.get(
+                'creditor', {}).get(
+                'name', 'Unknown')
         else:
-            counterparty_orig = transaction.get('debtor', {}).get('name', 'Unknown')
+            counterparty_orig = transaction.get(
+                'debtor', {}).get(
+                'name', 'Unknown')
 
         # Determine if income or expense
         is_income = amount > 0
@@ -142,10 +148,12 @@ class ClaudeCategorizer:
                     'medium': 0.6,
                     'low': 0.3
                 }
-                confidence_score = confidence_map.get(confidence_level.lower(), 0.3)
+                confidence_score = confidence_map.get(
+                    confidence_level.lower(), 0.3)
 
                 # Generate description using ORIGINAL counterparty name (preserves privacy locally)
-                # AI suggested a description based on anonymized data, we enhance it with real names
+                # AI suggested a description based on anonymized data, we
+                # enhance it with real names
                 final_description = self._build_local_description(
                     counterparty_orig, ai_description, category
                 )
@@ -176,11 +184,13 @@ class ClaudeCategorizer:
         """Build the prompt for Claude API."""
 
         # Format available categories
-        category_list = "\n".join([f"- {cat}" for cat in available_categories.keys()])
+        category_list = "\n".join(
+            [f"- {cat}" for cat in available_categories.keys()])
 
         # Format example rules (show 10-15 examples)
         examples = []
-        for pattern, (desc_template, category) in list(example_rules.items())[:15]:
+        for pattern, (desc_template, category) in list(
+                example_rules.items())[:15]:
             examples.append(f"- {pattern} → {category} (\"{desc_template}\")")
         example_text = "\n".join(examples)
 
@@ -236,9 +246,11 @@ Respond ONLY with the JSON object, nothing else. Remember: description must be i
         Returns:
             Description with original counterparty name for local storage
         """
-        # If AI's description contains "Private Person", replace with original name
+        # If AI's description contains "Private Person", replace with original
+        # name
         if "Private Person" in ai_description:
-            return ai_description.replace("Private Person", original_counterparty)
+            return ai_description.replace(
+                "Private Person", original_counterparty)
 
         # If original name is already in AI description, keep it
         if original_counterparty in ai_description:
@@ -273,7 +285,8 @@ Respond ONLY with the JSON object, nothing else. Remember: description must be i
             if 'category' in result and 'description' in result and 'confidence' in result:
                 return result
             else:
-                logger.warning(f"Missing required fields in response: {result}")
+                logger.warning(
+                    f"Missing required fields in response: {result}")
                 return None
 
         except json.JSONDecodeError as e:
@@ -295,9 +308,13 @@ def get_example_rules_for_ai(
         Dict with pattern -> (description_template, category_name)
     """
     examples = {}
-    for pattern, (desc_template, category_enum) in categorization_rules.items():
+    for pattern, (desc_template,
+                  category_enum) in categorization_rules.items():
         # Extract category name from enum
-        category_name = str(category_enum.value) if hasattr(category_enum, 'value') else str(category_enum)
+        category_name = str(
+            category_enum.value) if hasattr(
+            category_enum,
+            'value') else str(category_enum)
         examples[pattern] = (desc_template, category_name)
 
     return examples

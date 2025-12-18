@@ -11,7 +11,7 @@ Provides HTTP API for:
 import logging
 import os
 from datetime import datetime, timedelta
-from typing import Optional, Dict, Any
+from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Header, Body
 from fastapi.responses import FileResponse, JSONResponse
@@ -68,10 +68,13 @@ def verify_api_key(x_api_key: str = Header(None)) -> bool:
         from config.config_settings import API_SECRET_KEY
         expected_key = API_SECRET_KEY
     except ImportError:
-        expected_key = os.environ.get('API_SECRET_KEY', 'change-me-in-production')
+        expected_key = os.environ.get(
+            'API_SECRET_KEY', 'change-me-in-production')
 
     if not x_api_key or x_api_key != expected_key:
-        raise HTTPException(status_code=401, detail="Invalid or missing API key")
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid or missing API key")
     return True
 
 
@@ -100,7 +103,8 @@ async def health_check():
 
 
 @app.post("/api/login")
-async def login_with_browsercode(x_api_key: str = Header(..., alias="X-API-Key")):
+async def login_with_browsercode(
+        x_api_key: str = Header(..., alias="X-API-Key")):
     """
     Login to ASN Bank using browsercode.
 
@@ -128,7 +132,8 @@ async def login_with_browsercode(x_api_key: str = Header(..., alias="X-API-Key")
         # Check existing session first
         if await scraper.is_session_valid():
             await scraper.cleanup()
-            return {"success": True, "message": "Session already valid, no login needed"}
+            return {"success": True,
+                    "message": "Session already valid, no login needed"}
 
         # Login with browsercode
         logger.info("🔐 Attempting browsercode login...")
@@ -136,9 +141,11 @@ async def login_with_browsercode(x_api_key: str = Header(..., alias="X-API-Key")
         await scraper.cleanup()
 
         if success:
-            return {"success": True, "message": "Browsercode login successful, session saved"}
+            return {"success": True,
+                    "message": "Browsercode login successful, session saved"}
         else:
-            return {"success": False, "message": "Browsercode login failed, check logs for details"}
+            return {"success": False,
+                    "message": "Browsercode login failed, check logs for details"}
 
     except Exception as e:
         logger.error(f"❌ Browsercode login endpoint error: {e}")
@@ -257,7 +264,7 @@ async def download_transactions(
                 with open(csv_path, 'r', encoding='utf-8') as f:
                     line_count = sum(1 for line in f) - 1  # Subtract header
                 transaction_count = max(0, line_count)
-            except:
+            except BaseException:
                 transaction_count = None
 
             return DownloadResponse(

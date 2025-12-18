@@ -19,10 +19,16 @@ def _get_pending_file_path() -> str:
     try:
         from config.config_settings import PENDING_APPROVALS_FILE
         # Resolve relative to project root
-        base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        base_dir = os.path.dirname(
+            os.path.dirname(
+                os.path.dirname(
+                    os.path.abspath(__file__))))
         return os.path.join(base_dir, PENDING_APPROVALS_FILE)
     except ImportError:
-        base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        base_dir = os.path.dirname(
+            os.path.dirname(
+                os.path.dirname(
+                    os.path.abspath(__file__))))
         return os.path.join(base_dir, "data", "pending_approvals.json")
 
 
@@ -111,7 +117,8 @@ def set_message_id(approval_id: str, message_id: int) -> bool:
     queue = load_pending_queue()
 
     if approval_id not in queue["pending"]:
-        logger.warning(f"Approval {approval_id} not found when setting message_id")
+        logger.warning(
+            f"Approval {approval_id} not found when setting message_id")
         return False
 
     queue["pending"][approval_id]["message_id"] = message_id
@@ -133,7 +140,8 @@ def set_thread_id(approval_id: str, thread_id: int) -> bool:
     queue = load_pending_queue()
 
     if approval_id not in queue["pending"]:
-        logger.warning(f"Approval {approval_id} not found when setting thread_id")
+        logger.warning(
+            f"Approval {approval_id} not found when setting thread_id")
         return False
 
     queue["pending"][approval_id]["thread_id"] = thread_id
@@ -239,7 +247,8 @@ def approve_transaction(
     return True, result_data
 
 
-def reject_transaction(approval_id: str, rejected_by: int) -> Tuple[bool, Optional[Dict[str, Any]]]:
+def reject_transaction(
+        approval_id: str, rejected_by: int) -> Tuple[bool, Optional[Dict[str, Any]]]:
     """
     Reject/skip a pending transaction (discard it).
 
@@ -315,7 +324,8 @@ def clear_user_pending(user_id: int) -> int:
         del queue["pending"][aid]
 
     _save_pending_queue(queue)
-    logger.info(f"Cleared {len(to_remove)} pending approvals for user {user_id}")
+    logger.info(
+        f"Cleared {len(to_remove)} pending approvals for user {user_id}")
     return len(to_remove)
 
 

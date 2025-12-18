@@ -9,7 +9,6 @@ import discord
 from discord import ui
 import logging
 from typing import Dict, Any, Optional, List
-import asyncio
 
 logger = logging.getLogger(__name__)
 
@@ -79,10 +78,15 @@ class PendingReviewView(ui.View):
             transactions_for_session.append(tx)
 
         # Save to session (this will be picked up by start_transaction_prompt)
-        existing_remaining, existing_income, existing_expenses = load_session(self.user_id)
+        existing_remaining, existing_income, existing_expenses = load_session(
+            self.user_id)
         # Prepend pending transactions to any existing remaining
         all_remaining = transactions_for_session + existing_remaining
-        save_session(self.user_id, all_remaining, existing_income, existing_expenses)
+        save_session(
+            self.user_id,
+            all_remaining,
+            existing_income,
+            existing_expenses)
 
         # Clear pending queue since they're now in session
         clear_user_pending(self.user_id)
@@ -108,7 +112,8 @@ class PendingReviewView(ui.View):
         count = clear_user_pending(self.user_id)
         await self._update_message_skipped(interaction, count)
 
-    async def _update_message_in_progress(self, interaction: discord.Interaction, count: int):
+    async def _update_message_in_progress(
+            self, interaction: discord.Interaction, count: int):
         """Update message to show review in progress."""
         embed = discord.Embed(
             title="📋 Review In Progress",
@@ -120,14 +125,15 @@ class PendingReviewView(ui.View):
             item.disabled = True
         try:
             await interaction.message.edit(embed=embed, view=self)
-        except:
+        except BaseException:
             pass
 
-    async def _update_message_completed(self, interaction: discord.Interaction, approved: int, skipped: int):
+    async def _update_message_completed(
+            self, interaction: discord.Interaction, approved: int, skipped: int):
         """Update message to show review completed."""
         embed = discord.Embed(
             title="✅ Review Complete",
-            description=f"All transactions have been processed.",
+            description="All transactions have been processed.",
             color=discord.Color.green()
         )
         # Disable buttons
@@ -135,10 +141,11 @@ class PendingReviewView(ui.View):
             item.disabled = True
         try:
             await interaction.message.edit(embed=embed, view=self)
-        except:
+        except BaseException:
             pass
 
-    async def _update_message_skipped(self, interaction: discord.Interaction, count: int):
+    async def _update_message_skipped(
+            self, interaction: discord.Interaction, count: int):
         """Update message to show all skipped."""
         embed = discord.Embed(
             title="⏭️ All Skipped",
@@ -165,7 +172,7 @@ async def get_or_create_user_thread(
     if not user:
         try:
             user = await bot.fetch_user(user_id)
-        except:
+        except BaseException:
             user = None
 
     username = user.display_name if user else str(user_id)
@@ -195,7 +202,8 @@ async def get_or_create_user_thread(
         # Add user to thread
         if user:
             await thread.add_user(user)
-            logger.info(f"Created private thread '{thread_name}' and added user")
+            logger.info(
+                f"Created private thread '{thread_name}' and added user")
         else:
             logger.warning(f"Could not fetch user {user_id} to add to thread")
 
@@ -287,10 +295,12 @@ async def send_approval_requests(
             await thread.send(embed=embed, view=view)
             notified_count += 1
 
-            logger.info(f"Sent review request to thread for user {user_id}: {len(transactions)} transactions")
+            logger.info(
+                f"Sent review request to thread for user {user_id}: {len(transactions)} transactions")
 
         except Exception as e:
-            logger.error(f"Failed to send review request for user {user_id}: {e}")
+            logger.error(
+                f"Failed to send review request for user {user_id}: {e}")
 
     return notified_count
 
@@ -314,7 +324,7 @@ async def send_batch_summary(
 
     thread = await get_or_create_user_thread(channel, user_id, bot)
     if not thread:
-        logger.error(f"Could not get thread for batch summary")
+        logger.error("Could not get thread for batch summary")
         return
 
     embed = discord.Embed(
@@ -322,8 +332,14 @@ async def send_batch_summary(
         color=discord.Color.blue()
     )
 
-    embed.add_field(name="✅ Auto-Uploaded", value=str(auto_categorized), inline=True)
-    embed.add_field(name="🔍 Need Review", value=str(needs_approval), inline=True)
+    embed.add_field(
+        name="✅ Auto-Uploaded",
+        value=str(auto_categorized),
+        inline=True)
+    embed.add_field(
+        name="🔍 Need Review",
+        value=str(needs_approval),
+        inline=True)
 
     if needs_approval > 0:
         embed.add_field(

@@ -31,9 +31,11 @@ MENTION_USER_IDS: List[int] = [
 
 # CSV Download Link for daily reminders (where users can download their transaction CSV)
 # Set to None or empty string to disable the link in reminders
-CSV_DOWNLOAD_LINK = ""  # Example: "https://bankname.com/export" or "https://yourdomain.com/csv"
+# Example: "https://bankname.com/export" or "https://yourdomain.com/csv"
+CSV_DOWNLOAD_LINK = ""
 
-# Timezone for reminder scheduling (uses system TZ environment variable, defaults to UTC)
+# Timezone for reminder scheduling (uses system TZ environment variable,
+# defaults to UTC)
 TIMEZONE = os.environ.get('TZ', 'UTC')
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -107,11 +109,13 @@ API_SECRET_KEY = os.environ.get('API_SECRET_KEY', 'change-me-in-production')
 
 # Ensure directories exist
 # Create absolute paths relative to project root
-# __file__ = src/config/config_settings.py, so go up 3 levels to reach project root
+# __file__ = src/config/config_settings.py, so go up 3 levels to reach
+# project root
 _project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
 _upload_path = os.path.join(_project_root, UPLOAD_DIR)
 _bank_download_path = os.path.join(_project_root, BANK_DOWNLOAD_DIR)
-_bank_session_dir = os.path.dirname(os.path.join(_project_root, BANK_SESSION_FILE))
+_bank_session_dir = os.path.dirname(
+    os.path.join(_project_root, BANK_SESSION_FILE))
 
 os.makedirs(_upload_path, exist_ok=True)
 os.makedirs(_bank_download_path, exist_ok=True)
@@ -124,8 +128,10 @@ os.makedirs(_bank_session_dir, exist_ok=True)
 # Log the loaded configuration for debugging
 logger = logging.getLogger(__name__)
 logger.debug(f"🔧 Loaded Google Sheets config: {GSHEET_NAME=}, {GSHEET_TAB=}")
-logger.debug(f"🔧 Loaded row config: expense_start={GSHEET_EXPENSE_START_ROW}, income_start={GSHEET_INCOME_START_ROW}")
-logger.debug(f"🔧 Loaded reminder config: time={DAILY_REMINDER_TIME}, channel={REMINDER_CHANNEL_ID}, users={len(MENTION_USER_IDS)}")
+logger.debug(
+    f"🔧 Loaded row config: expense_start={GSHEET_EXPENSE_START_ROW}, income_start={GSHEET_INCOME_START_ROW}")
+logger.debug(
+    f"🔧 Loaded reminder config: time={DAILY_REMINDER_TIME}, channel={REMINDER_CHANNEL_ID}, users={len(MENTION_USER_IDS)}")
 
 # ─────────────────────────────────────────────────────────────────────────────
 # EXPORTS

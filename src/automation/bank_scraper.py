@@ -22,7 +22,8 @@ logger = logging.getLogger(__name__)
 class ASNBankScraper:
     """Scraper for ASN Bank with QR login and session management."""
 
-    def __init__(self, session_file: str = "data/bank_session.json", download_dir: str = "data/bank_downloads"):
+    def __init__(self, session_file: str = "data/bank_session.json",
+                 download_dir: str = "data/bank_downloads"):
         """
         Initialize the ASN Bank scraper.
 
@@ -81,7 +82,8 @@ class ASNBankScraper:
             except Exception as e:
                 logger.error(f"❌ Failed to save session: {e}")
 
-    async def login_with_qr(self, qr_save_path: str = "/tmp/asn_qr_login.png") -> Tuple[bool, str]:
+    async def login_with_qr(
+            self, qr_save_path: str = "/tmp/asn_qr_login.png") -> Tuple[bool, str]:
         """
         Initiate QR login and save QR code for user to scan.
 
@@ -92,7 +94,8 @@ class ASNBankScraper:
             Tuple of (success, qr_image_path or error_message)
         """
         try:
-            await self._init_browser(headless=False)  # Show browser for QR scan
+            # Show browser for QR scan
+            await self._init_browser(headless=False)
             if self.browser is None:
                 return False, "Browser initialization failed"
 
@@ -104,7 +107,8 @@ class ASNBankScraper:
             await self.page.goto(self.login_url, wait_until="networkidle")
 
             # Wait for QR code to appear
-            # Note: Actual selectors will need to be updated based on ASN Bank's HTML structure
+            # Note: Actual selectors will need to be updated based on ASN
+            # Bank's HTML structure
             logger.info("⏳ Waiting for QR code element...")
 
             try:
@@ -123,14 +127,16 @@ class ASNBankScraper:
                     try:
                         qr_element = await self.page.wait_for_selector(selector, timeout=10000)
                         if qr_element:
-                            logger.info(f"✅ Found QR code with selector: {selector}")
+                            logger.info(
+                                f"✅ Found QR code with selector: {selector}")
                             break
                     except Exception:
                         continue
 
                 if not qr_element:
                     # Fallback: screenshot the entire page
-                    logger.warning("⚠️ Could not find QR code element, taking full page screenshot")
+                    logger.warning(
+                        "⚠️ Could not find QR code element, taking full page screenshot")
                     await self.page.screenshot(path=qr_save_path, full_page=True)
                 else:
                     # Screenshot just the QR code
@@ -167,7 +173,8 @@ class ASNBankScraper:
             logger.error(f"❌ QR login error: {e}")
             return False, str(e)
 
-    async def login_with_browsercode(self, browsercode: str, headless: bool = False) -> bool:
+    async def login_with_browsercode(
+            self, browsercode: str, headless: bool = False) -> bool:
         """
         Login using browsercode (5-digit PIN) instead of QR code.
 
@@ -181,7 +188,8 @@ class ASNBankScraper:
         Returns:
             True if login successful, False otherwise
         """
-        if not browsercode or len(browsercode) != 5 or not browsercode.isdigit():
+        if not browsercode or len(
+                browsercode) != 5 or not browsercode.isdigit():
             logger.error("❌ Invalid browsercode: must be 5 digits")
             return False
 
@@ -191,9 +199,11 @@ class ASNBankScraper:
                 logger.error("❌ Browser initialization failed")
                 return False
 
-            # Load existing session if available to preserve device registration
+            # Load existing session if available to preserve device
+            # registration
             if os.path.exists(self.session_file):
-                logger.info("📂 Loading existing session for device registration")
+                logger.info(
+                    "📂 Loading existing session for device registration")
                 self.context = await self.browser.new_context(storage_state=self.session_file)
             else:
                 logger.info("🆕 Creating new browser context")
@@ -227,14 +237,16 @@ class ASNBankScraper:
                     element = await self.page.wait_for_selector(selector, timeout=5000)
                     if element:
                         await element.click()
-                        logger.info(f"✅ Clicked browsercode option: {selector}")
+                        logger.info(
+                            f"✅ Clicked browsercode option: {selector}")
                         clicked_option = True
                         break
                 except Exception:
                     continue
 
             if not clicked_option:
-                logger.warning("⚠️ Could not find browsercode option button, proceeding anyway...")
+                logger.warning(
+                    "⚠️ Could not find browsercode option button, proceeding anyway...")
 
             # Wait for browsercode input field
             await asyncio.sleep(1)
@@ -296,7 +308,8 @@ class ASNBankScraper:
                     continue
 
             if not clicked_submit:
-                logger.warning("⚠️ Could not find submit button, trying Enter key...")
+                logger.warning(
+                    "⚠️ Could not find submit button, trying Enter key...")
                 await self.page.keyboard.press("Enter")
 
             # Wait for login success (redirect to dashboard)
@@ -381,7 +394,8 @@ class ASNBankScraper:
         """
         for attempt in range(max_retries):
             try:
-                logger.info(f"📥 Downloading transactions from {date_from} to {date_to} (attempt {attempt + 1}/{max_retries})")
+                logger.info(
+                    f"📥 Downloading transactions from {date_from} to {date_to} (attempt {attempt + 1}/{max_retries})")
 
                 # Load session if not already loaded
                 if not self.page:
@@ -399,7 +413,8 @@ class ASNBankScraper:
                 await asyncio.sleep(2)
 
                 # Set date filters
-                # Note: Selectors will need to be updated based on ASN Bank's actual HTML
+                # Note: Selectors will need to be updated based on ASN Bank's
+                # actual HTML
                 try:
                     # Try to find date filter inputs
                     date_from_selector = "input[name*='from'], input[id*='from'], input[placeholder*='van']"
@@ -409,7 +424,8 @@ class ASNBankScraper:
                     await self.page.fill(date_to_selector, date_to)
                     logger.info(f"📅 Set date range: {date_from} - {date_to}")
 
-                    # Apply filters (usually need to click a button or the form auto-submits)
+                    # Apply filters (usually need to click a button or the form
+                    # auto-submits)
                     await asyncio.sleep(1)
 
                 except Exception as e:
@@ -434,7 +450,8 @@ class ASNBankScraper:
                         try:
                             await self.page.click(selector, timeout=5000)
                             clicked = True
-                            logger.info(f"✅ Clicked download button: {selector}")
+                            logger.info(
+                                f"✅ Clicked download button: {selector}")
                             break
                         except Exception:
                             continue
@@ -460,14 +477,16 @@ class ASNBankScraper:
                 return filepath
 
             except Exception as e:
-                logger.error("❌ Download attempt %d failed: %s", attempt + 1, e)
+                logger.error(
+                    "❌ Download attempt %d failed: %s", attempt + 1, e)
 
                 if attempt < max_retries - 1:
                     wait_time = 2 ** attempt  # Exponential backoff
                     logger.info(f"⏳ Retrying in {wait_time}s...")
                     await asyncio.sleep(wait_time)
                 else:
-                    logger.error(f"❌ All {max_retries} download attempts failed")
+                    logger.error(
+                        f"❌ All {max_retries} download attempts failed")
                     return None
 
         return None

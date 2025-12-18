@@ -7,9 +7,8 @@ from discord.ext import commands
 import os
 import logging
 import asyncio
-from finance_core.csv_helper import load_transactions_from_csv
 from finance_core.session_management import (
-    session_exists, load_session, clear_session, save_session
+    session_exists, load_session, clear_session
 )
 from finance_core.ui.cached_transactions_view import CachedTransactionsView
 from finance_core.export import process_csv_file
@@ -17,11 +16,13 @@ from config.config_settings import UPLOAD_DIR
 
 logger = logging.getLogger(__name__)
 
+
 class FinanceBot(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @app_commands.command(name="resume", description="Resume a previously paused finance session")
+    @app_commands.command(name="resume",
+                          description="Resume a previously paused finance session")
     async def resume(self, interaction: discord.Interaction):
         user_id = interaction.user.id
         if not session_exists(user_id):
@@ -34,7 +35,8 @@ class FinanceBot(commands.Cog):
         await interaction.response.send_message("🔄 Resuming session...", ephemeral=True)
         await process_csv_file(file_path=None, ctx_or_interaction=interaction)
 
-    @app_commands.command(name="status", description="Check your current finance session status")
+    @app_commands.command(name="status",
+                          description="Check your current finance session status")
     async def status(self, interaction: discord.Interaction):
         user_id = interaction.user.id
         if not session_exists(user_id):
@@ -47,24 +49,27 @@ class FinanceBot(commands.Cog):
         remaining, income, expenses = load_session(user_id)
         total_transactions = len(remaining) + len(income) + len(expenses)
         processed = len(income) + len(expenses)
-        progress_percent = (processed / total_transactions) * 100 if total_transactions > 0 else 0
-        
-        status_msg = f"📊 **Session Status**\n"
+        progress_percent = (processed / total_transactions) * \
+            100 if total_transactions > 0 else 0
+
+        status_msg = "📊 **Session Status**\n"
         status_msg += f"⏳ Remaining: {len(remaining)} | "
         status_msg += f"💵 Income: {len(income)} | "
         status_msg += f"💸 Expenses: {len(expenses)}\n"
         status_msg += f"📈 Progress: {progress_percent:.1f}% ({processed}/{total_transactions})"
-        
-        # Note: Transactions are automatically uploaded to Google Sheets upon categorization
+
+        # Note: Transactions are automatically uploaded to Google Sheets upon
+        # categorization
         if processed > 0:
             status_msg += f"\n✅ {processed} transactions automatically uploaded to Google Sheets"
-        
+
         await interaction.response.send_message(status_msg, ephemeral=True)
         # Auto-delete after 8 seconds
         response = await interaction.original_response()
         asyncio.create_task(self._delete_after_delay(response, 8))
 
-    @app_commands.command(name="cancel", description="Cancel and delete your current session")
+    @app_commands.command(name="cancel",
+                          description="Cancel and delete your current session")
     async def cancel(self, interaction: discord.Interaction):
         user_id = interaction.user.id
         if not session_exists(user_id):
@@ -80,8 +85,10 @@ class FinanceBot(commands.Cog):
         response = await interaction.original_response()
         asyncio.create_task(self._delete_after_delay(response, 5))
 
-    @app_commands.command(name="upload", description="Upload a CSV file to start processing transactions")
-    async def upload(self, interaction: discord.Interaction, attachment: discord.Attachment):
+    @app_commands.command(name="upload",
+                          description="Upload a CSV file to start processing transactions")
+    async def upload(self, interaction: discord.Interaction,
+                     attachment: discord.Attachment):
         user_id = interaction.user.id
 
         if session_exists(user_id):
@@ -99,7 +106,8 @@ class FinanceBot(commands.Cog):
             return
 
         # Create user-specific filename to avoid conflicts
-        file_path = os.path.join(UPLOAD_DIR, f"{user_id}_{attachment.filename}")
+        file_path = os.path.join(
+            UPLOAD_DIR, f"{user_id}_{attachment.filename}")
         os.makedirs(UPLOAD_DIR, exist_ok=True)
 
         try:
@@ -115,7 +123,8 @@ class FinanceBot(commands.Cog):
             if os.path.exists(file_path):
                 os.remove(file_path)
 
-    @app_commands.command(name="cached", description="View and process your cached transactions")
+    @app_commands.command(name="cached",
+                          description="View and process your cached transactions")
     async def cached(self, interaction: discord.Interaction):
         user_id = interaction.user.id
 
@@ -146,7 +155,8 @@ class FinanceBot(commands.Cog):
             embed.add_field(
                 name=f"{tx_type_emoji} {cached_tx['cache_id']} - {cached_tx['amount']} EUR",
                 value=f"**{cached_tx['auto_description'][:100]}{'...' if len(cached_tx['auto_description']) > 100 else ''}**\n"
-                      f"📅 {cached_tx['timestamp'][:19].replace('T', ' ')}",  # Simple timestamp formatting
+                      # Simple timestamp formatting
+                      f"📅 {cached_tx['timestamp'][:19].replace('T', ' ')}",
                 inline=False
             )
 
@@ -170,7 +180,8 @@ class FinanceBot(commands.Cog):
         view = CachedTransactionsView(user_id, cached_transactions)
         await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
-    @app_commands.command(name="review", description="Review auto-categorized transactions from current session")
+    @app_commands.command(name="review",
+                          description="Review auto-categorized transactions from current session")
     async def review(self, interaction: discord.Interaction):
         user_id = interaction.user.id
 
@@ -204,7 +215,13 @@ class FinanceBot(commands.Cog):
             confidence_pct = int(auto_cat["confidence"] * 100)
 
             # Get counterparty name
-            counterparty = tx.get("creditor", {}).get("name") or tx.get("debtor", {}).get("name", "Unknown")
+            counterparty = tx.get(
+                "creditor",
+                {}).get("name") or tx.get(
+                "debtor",
+                {}).get(
+                "name",
+                "Unknown")
 
             embed.add_field(
                 name=f"{tx_type_emoji} {method_emoji} {counterparty} - €{amount}",
@@ -237,7 +254,8 @@ class FinanceBot(commands.Cog):
         response = await interaction.original_response()
         asyncio.create_task(self._delete_after_delay(response, 60))
 
-    @app_commands.command(name="sort", description="Sort all transactions in Google Sheets by date")
+    @app_commands.command(name="sort",
+                          description="Sort all transactions in Google Sheets by date")
     async def sort_sheet(self, interaction: discord.Interaction):
         """Manually trigger sorting of all transactions in Google Sheets by date"""
         await interaction.response.send_message("📊 Sorting transactions by date...", ephemeral=True)
@@ -251,7 +269,7 @@ class FinanceBot(commands.Cog):
                 None, sort_google_sheet_transactions
             )
 
-            result_msg = f"✅ Sort complete!\n"
+            result_msg = "✅ Sort complete!\n"
             result_msg += f"📊 Sorted {expense_sorted} expense rows and {income_sorted} income rows by date."
 
             await interaction.edit_original_response(content=result_msg)
@@ -271,8 +289,9 @@ class FinanceBot(commands.Cog):
         await asyncio.sleep(delay)
         try:
             await message.delete()
-        except:
+        except BaseException:
             pass  # Message might already be deleted
+
 
 async def setup(bot):
     """Required function for loading the cog"""

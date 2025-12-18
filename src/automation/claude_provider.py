@@ -12,7 +12,7 @@ import json
 import logging
 import subprocess
 import asyncio
-from typing import Optional, Dict, Any
+from typing import Optional
 
 # Make anthropic optional - only needed if using API
 try:
@@ -51,13 +51,15 @@ class ClaudeProvider:
             logger.info("Using Claude Code CLI (free)")
         elif api_key:
             if not HAS_ANTHROPIC:
-                logger.error("API key provided but anthropic module not installed")
+                logger.error(
+                    "API key provided but anthropic module not installed")
                 logger.info("Install with: pip install anthropic")
             else:
                 logger.info("Using Anthropic API (requires credits)")
                 self.api_client = AsyncAnthropic(api_key=api_key)
         else:
-            logger.warning("No Claude access available - neither CLI nor API key")
+            logger.warning(
+                "No Claude access available - neither CLI nor API key")
 
     def _check_cli_available(self) -> bool:
         """Check if Claude Code CLI is available."""
@@ -76,7 +78,8 @@ class ClaudeProvider:
             logger.debug("Claude Code CLI not available")
             return False
 
-    async def complete(self, prompt: str, max_tokens: int = 500, temperature: float = 0.3) -> str:
+    async def complete(self, prompt: str, max_tokens: int = 500,
+                       temperature: float = 0.3) -> str:
         """
         Get completion from Claude (CLI or API).
 
@@ -156,12 +159,14 @@ class ClaudeProvider:
             response = json.loads(stdout_str)
 
             if response.get("is_error"):
-                raise RuntimeError(f"Claude Code error: {response.get('result')}")
+                raise RuntimeError(
+                    f"Claude Code error: {response.get('result')}")
 
             response_text = response.get("result", "")
             cost = response.get("total_cost_usd", 0)
 
-            logger.info(f"Claude Code CLI response received (cost: ${cost:.4f})")
+            logger.info(
+                f"Claude Code CLI response received (cost: ${cost:.4f})")
             logger.debug(f"Response text length: {len(response_text)} chars")
 
             if not response_text:
@@ -177,7 +182,8 @@ class ClaudeProvider:
             logger.error(f"CLI completion failed: {e}")
             raise
 
-    async def _complete_api(self, prompt: str, max_tokens: int, temperature: float) -> str:
+    async def _complete_api(
+            self, prompt: str, max_tokens: int, temperature: float) -> str:
         """Complete using Anthropic API (async version)."""
         try:
             # Map model alias to full API model name

@@ -4,7 +4,7 @@ import discord
 from discord.ext import commands
 from finance_core.csv_helper import load_transactions_from_csv
 from finance_core.session_management import (
-    save_session, load_session, clear_session, session_exists,
+    save_session, load_session, clear_session,
     add_auto_categorized_transaction
 )
 from finance_core.ui.transaction_prompt import start_transaction_prompt
@@ -14,7 +14,9 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-async def send_message(ctx_or_interaction: Union[discord.Interaction, commands.Context], message: str, ephemeral: bool = False) -> None:
+
+async def send_message(ctx_or_interaction: Union[discord.Interaction,
+                       commands.Context], message: str, ephemeral: bool = False) -> None:
     """Helper function to send messages to both Context and Interaction objects"""
     if isinstance(ctx_or_interaction, discord.Interaction):
         if ctx_or_interaction.response.is_done():
@@ -25,7 +27,9 @@ async def send_message(ctx_or_interaction: Union[discord.Interaction, commands.C
         # It's a Context object
         await ctx_or_interaction.send(message)
 
-async def process_csv_file(file_path: Optional[str], ctx_or_interaction: Union[discord.Interaction, commands.Context]) -> None:
+
+async def process_csv_file(
+        file_path: Optional[str], ctx_or_interaction: Union[discord.Interaction, commands.Context]) -> None:
     """
     Process CSV file with automatic categorization for high-confidence transactions.
 
@@ -68,13 +72,16 @@ async def process_csv_file(file_path: Optional[str], ctx_or_interaction: Union[d
         ai_enabled = provider.use_cli or provider.api_client is not None
 
         if ai_enabled:
-            logger.info("AI categorization enabled - will auto-categorize high-confidence transactions")
+            logger.info(
+                "AI categorization enabled - will auto-categorize high-confidence transactions")
         else:
-            logger.info("AI categorization disabled - only regex matching available")
+            logger.info(
+                "AI categorization disabled - only regex matching available")
 
         engine = create_categorization_engine(ai_enabled=ai_enabled)
     except Exception as e:
-        logger.warning(f"Failed to initialize categorization engine: {e}. Falling back to manual mode.")
+        logger.warning(
+            f"Failed to initialize categorization engine: {e}. Falling back to manual mode.")
         # Fallback: Save all transactions for manual processing
         save_session(user_id, transactions, [], [])
         if isinstance(ctx_or_interaction, discord.Interaction):
@@ -86,14 +93,15 @@ async def process_csv_file(file_path: Optional[str], ctx_or_interaction: Union[d
         return
 
     # Categorize all transactions with progress feedback
-    logger.info(f"Processing {len(transactions)} transactions with categorization engine")
+    logger.info(
+        f"Processing {len(transactions)} transactions with categorization engine")
     auto_categorized_count = {"regex": 0, "ai": 0}
     manual_needed = []
     auto_income = []
     auto_expenses = []
 
     # Send initial progress message
-    progress_msg = await send_message(ctx_or_interaction, "🔄 Categorizing transactions...", ephemeral=True)
+    await send_message(ctx_or_interaction, "🔄 Categorizing transactions...", ephemeral=True)
 
     try:
         for i, tx in enumerate(transactions, 1):
@@ -109,12 +117,13 @@ async def process_csv_file(file_path: Optional[str], ctx_or_interaction: Union[d
                 try:
                     if isinstance(ctx_or_interaction, discord.Interaction):
                         await ctx_or_interaction.edit_original_response(content=progress_text)
-                except:
+                except BaseException:
                     pass  # Ignore if message update fails
 
             if result.method in ['regex', 'ai_auto']:
                 # High confidence - store for later upload
-                tx_type = "income" if tx.get("credit_debit_indicator") == "CRDT" else "expense"
+                tx_type = "income" if tx.get(
+                    "credit_debit_indicator") == "CRDT" else "expense"
 
                 # Create categorized transaction
                 categorized_tx = {
@@ -157,20 +166,24 @@ async def process_csv_file(file_path: Optional[str], ctx_or_interaction: Union[d
         logger.error(f"Error during categorization loop: {e}", exc_info=True)
         # Save whatever we categorized so far before crashing
         # Extract raw transactions for session storage
-        raw_manual = [item["transaction"] if isinstance(item, dict) and "transaction" in item else item for item in manual_needed]
+        raw_manual = [item["transaction"] if isinstance(
+            item, dict) and "transaction" in item else item for item in manual_needed]
         save_session(user_id, raw_manual, auto_income, auto_expenses)
         await send_message(ctx_or_interaction, f"❌ Error during categorization: {e}\nPartial progress saved. Use `/resume` to continue.", ephemeral=True)
         raise  # Re-raise to let caller handle
 
-    # Upload auto-categorized transactions IMMEDIATELY (don't wait for manual review)
+    # Upload auto-categorized transactions IMMEDIATELY (don't wait for manual
+    # review)
     total_auto = auto_categorized_count["regex"] + auto_categorized_count["ai"]
 
     if auto_income or auto_expenses:
-        logger.info(f"Uploading {len(auto_income)} income + {len(auto_expenses)} expenses immediately")
+        logger.info(
+            f"Uploading {len(auto_income)} income + {len(auto_expenses)} expenses immediately")
         await _upload_auto_categorized(user_id, auto_income, auto_expenses, ctx_or_interaction)
 
     # Save session with ONLY manual-needed transactions (auto ones are already uploaded)
-    # Extract raw transactions for session storage (manual_needed contains dicts with AI results)
+    # Extract raw transactions for session storage (manual_needed contains
+    # dicts with AI results)
     raw_manual = [item["transaction"] for item in manual_needed]
     save_session(user_id, raw_manual, [], [])
 
@@ -192,11 +205,11 @@ async def process_csv_file(file_path: Optional[str], ctx_or_interaction: Union[d
     if manual_needed:
         summary += f"\n🔍 {len(manual_needed)} transaction{'s' if len(manual_needed) > 1 else ''} need manual review."
         if total_auto > 0:
-            summary += f"\n💡 Use `/review` to check auto-categorizations."
+            summary += "\n💡 Use `/review` to check auto-categorizations."
     else:
         summary += "\n\n🎉 All transactions processed automatically!"
         if total_auto > 0:
-            summary += f"\n💡 Use `/review` to check categorizations."
+            summary += "\n💡 Use `/review` to check categorizations."
 
     # Log summary (in case Discord message fails)
     logger.info(f"Summary: {summary.replace(chr(10), ' ')}")
@@ -210,7 +223,8 @@ async def process_csv_file(file_path: Optional[str], ctx_or_interaction: Union[d
             await send_message(ctx_or_interaction, summary, ephemeral=True)
             logger.debug("Successfully sent summary via send_message")
     except discord.errors.NotFound:
-        logger.warning("Interaction token expired - unable to send summary message to Discord")
+        logger.warning(
+            "Interaction token expired - unable to send summary message to Discord")
         # Continue anyway - upload and manual processing should still happen
     except Exception as e:
         logger.error(f"Failed to send summary message: {e}")
@@ -218,13 +232,15 @@ async def process_csv_file(file_path: Optional[str], ctx_or_interaction: Union[d
 
     # Handle low-confidence transactions
     if manual_needed:
-        # Check if approval channel is configured for proactive Discord approvals
+        # Check if approval channel is configured for proactive Discord
+        # approvals
         try:
             from config.config_settings import APPROVAL_CHANNEL_ID
         except ImportError:
             APPROVAL_CHANNEL_ID = 0
 
-        if APPROVAL_CHANNEL_ID and APPROVAL_CHANNEL_ID > 0 and isinstance(ctx_or_interaction, discord.Interaction):
+        if APPROVAL_CHANNEL_ID and APPROVAL_CHANNEL_ID > 0 and isinstance(
+                ctx_or_interaction, discord.Interaction):
             # Use new proactive Discord approval flow
             await _send_approval_requests(
                 ctx_or_interaction,
@@ -240,7 +256,8 @@ async def process_csv_file(file_path: Optional[str], ctx_or_interaction: Union[d
                 await start_transaction_prompt(ctx_or_interaction, user_id)
             except Exception as e:
                 logger.error(f"Failed to start transaction prompt: {e}")
-                logger.warning(f"User {user_id} should manually run /resume to continue categorization")
+                logger.warning(
+                    f"User {user_id} should manually run /resume to continue categorization")
         else:
             # For legacy context
             await send_message(ctx_or_interaction, "📊 Starting manual categorization. Use slash commands.")
@@ -269,12 +286,14 @@ async def _send_approval_requests(
     from finance_core.ui.discord_notifier import send_approval_requests, send_batch_summary
     from config.config_settings import APPROVAL_CHANNEL_ID
 
-    logger.info(f"Adding {len(transactions_with_ai)} transactions to pending approval queue")
+    logger.info(
+        f"Adding {len(transactions_with_ai)} transactions to pending approval queue")
 
     # Add each transaction to pending queue (AI results already computed)
     for item in transactions_with_ai:
         tx = item["transaction"]
-        tx_type = "income" if tx.get("credit_debit_indicator") == "CRDT" else "expense"
+        tx_type = "income" if tx.get(
+            "credit_debit_indicator") == "CRDT" else "expense"
 
         add_pending_transaction(
             user_id=user_id,
@@ -306,7 +325,8 @@ async def _send_approval_requests(
         user_id=user_id
     )
 
-    logger.info(f"Sent {sent_count} approval requests to channel {APPROVAL_CHANNEL_ID}")
+    logger.info(
+        f"Sent {sent_count} approval requests to channel {APPROVAL_CHANNEL_ID}")
 
 
 async def _upload_auto_categorized(
@@ -328,14 +348,15 @@ async def _upload_auto_categorized(
         date_str = tx.get("booking_date", "01-01-1970")
         try:
             return datetime.strptime(date_str, "%d-%m-%Y")
-        except:
+        except BaseException:
             return datetime(1970, 1, 1)
 
     # Sort by date (oldest first) before queueing
     income_sorted = sorted(income_txs, key=parse_date)
     expenses_sorted = sorted(expense_txs, key=parse_date)
 
-    logger.info(f"Queueing {len(income_sorted)} income + {len(expenses_sorted)} expenses for upload")
+    logger.info(
+        f"Queueing {len(income_sorted)} income + {len(expenses_sorted)} expenses for upload")
 
     try:
         from finance_core.background_upload import queue_transaction_upload, sort_sheet_after_uploads_async
@@ -346,7 +367,8 @@ async def _upload_auto_categorized(
         for tx in expenses_sorted:
             queue_transaction_upload(tx, "expense", user_id)
 
-        logger.info(f"Successfully queued {len(income_sorted) + len(expenses_sorted)} auto-categorized transactions")
+        logger.info(
+            f"Successfully queued {len(income_sorted) + len(expenses_sorted)} auto-categorized transactions")
 
         # Trigger sheet sort after uploads complete (runs in background)
         if trigger_sort:
@@ -354,11 +376,14 @@ async def _upload_auto_categorized(
             await sort_sheet_after_uploads_async(timeout=120.0)
 
     except Exception as e:
-        logger.error(f"Failed to queue auto-categorized transactions: {e}", exc_info=True)
+        logger.error(
+            f"Failed to queue auto-categorized transactions: {e}",
+            exc_info=True)
         raise
 
 
-async def _upload_sorted_transactions(user_id: int, ctx_or_interaction: Union[discord.Interaction, commands.Context]) -> None:
+async def _upload_sorted_transactions(
+        user_id: int, ctx_or_interaction: Union[discord.Interaction, commands.Context]) -> None:
     """Sort all categorized transactions by date and upload to Google Sheets (for manual review completion)"""
     from datetime import datetime
 
@@ -374,13 +399,14 @@ async def _upload_sorted_transactions(user_id: int, ctx_or_interaction: Union[di
         date_str = tx.get("booking_date", "01-01-1970")
         try:
             return datetime.strptime(date_str, "%d-%m-%Y")
-        except:
+        except BaseException:
             return datetime(1970, 1, 1)
 
     income_sorted = sorted(income_txs, key=parse_date)
     expenses_sorted = sorted(expense_txs, key=parse_date)
 
-    logger.info(f"Uploading {len(income_sorted)} income + {len(expenses_sorted)} expenses sorted by date")
+    logger.info(
+        f"Uploading {len(income_sorted)} income + {len(expenses_sorted)} expenses sorted by date")
 
     try:
         from finance_core.background_upload import queue_transaction_upload, sort_sheet_after_uploads_async
@@ -394,7 +420,7 @@ async def _upload_sorted_transactions(user_id: int, ctx_or_interaction: Union[di
         upload_msg = f"📤 Uploaded {len(income_sorted) + len(expenses_sorted)} transactions sorted by date!"
         try:
             await send_message(ctx_or_interaction, upload_msg, ephemeral=True)
-        except:
+        except BaseException:
             pass  # Ignore message failures
 
         # Trigger sheet sort after uploads complete
@@ -406,5 +432,5 @@ async def _upload_sorted_transactions(user_id: int, ctx_or_interaction: Union[di
         try:
             error_msg = f"❌ Error uploading transactions: {str(e)}"
             await send_message(ctx_or_interaction, error_msg, ephemeral=True)
-        except:
+        except BaseException:
             pass

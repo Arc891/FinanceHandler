@@ -14,7 +14,7 @@ Privacy Principles:
 
 import re
 import logging
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +54,8 @@ class TransactionAnonymizer:
         r'\bReferentie:\s*[A-Z0-9-]+',  # Reference numbers
         r'\bIBAN:\s*[A-Z]{2}[0-9]{2}[A-Z0-9]+',  # IBANs
         r'\bNL\d{2}[A-Z]{4}\d+',  # Dutch IBANs
-        r'(?:Naam|Name):\s*[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*',  # "Naam: Jan de Vries"
+        # "Naam: Jan de Vries"
+        r'(?:Naam|Name):\s*[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*',
         r'\bKenmerk:\s*[A-Z0-9-]+',  # Identification numbers
         r'\b\d{6,}\b',  # Long numbers (could be personal references)
     ]
@@ -126,7 +127,8 @@ class TransactionAnonymizer:
             'credit_debit_indicator': tx_type,
             'creditor': counterparty_clean,  # Anonymized merchant name
             'remittance_information': remittance_clean,  # Anonymized description
-            'booking_date': transaction.get('booking_date', '')  # Just the date
+            # Just the date
+            'booking_date': transaction.get('booking_date', '')
         }
 
         # Log what was anonymized (for transparency)

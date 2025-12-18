@@ -65,7 +65,8 @@ class CategorizationEngine:
             f"AI: {self.ai_enabled}, Threshold: {ai_confidence_threshold}"
         )
 
-    async def categorize(self, transaction: Dict[str, Any]) -> CategorizationResult:
+    async def categorize(
+            self, transaction: Dict[str, Any]) -> CategorizationResult:
         """
         Categorize a transaction using regex → AI pipeline.
 
@@ -81,7 +82,8 @@ class CategorizationEngine:
             CategorizationResult with category, description, confidence, and method
         """
         # Step 1: Try regex categorization
-        regex_category, regex_description = self._apply_regex_rules(transaction)
+        regex_category, regex_description = self._apply_regex_rules(
+            transaction)
 
         if regex_category:
             logger.info(f"Regex match: {regex_category} - {regex_description}")
@@ -144,8 +146,10 @@ class CategorizationEngine:
             is_income = transaction.get("credit_debit_indicator") == "CRDT"
 
             # Get available categories
-            expense_categories = {cat.value: cat.value for cat in ExpenseCategory if cat != ExpenseCategory.DUMMY_CACHED}
-            income_categories = {cat.value: cat.value for cat in IncomeCategory if cat != IncomeCategory.DUMMY_CACHED}
+            expense_categories = {
+                cat.value: cat.value for cat in ExpenseCategory if cat != ExpenseCategory.DUMMY_CACHED}
+            income_categories = {
+                cat.value: cat.value for cat in IncomeCategory if cat != IncomeCategory.DUMMY_CACHED}
 
             # Get example rules for AI context
             rules = CATEGORIZATION_RULES_INCOME if is_income else CATEGORIZATION_RULES_EXPENSE
@@ -219,7 +223,8 @@ class CategorizationEngine:
         total = len(results)
         regex_count = sum(1 for r in results if r.method == 'regex')
         ai_auto_count = sum(1 for r in results if r.method == 'ai_auto')
-        ai_manual_count = sum(1 for r in results if r.method == 'ai_manual_needed')
+        ai_manual_count = sum(
+            1 for r in results if r.method == 'ai_manual_needed')
         none_count = sum(1 for r in results if r.method == 'none')
 
         logger.info(
