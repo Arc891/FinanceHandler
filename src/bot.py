@@ -74,7 +74,7 @@ logger.info("✅ Bot instance created")
 @bot.event
 async def on_ready():
     logger.info(f"🤖 {bot.user} connected to Discord ({len(bot.guilds)} guilds)")
-    
+
     # Start Google Sheets upload queue
     try:
         from finance_core.background_upload import start_upload_queue
@@ -82,6 +82,31 @@ async def on_ready():
         logger.info("✅ Google Sheets upload queue started")
     except Exception as e:
         logger.error(f"❌ Failed to start upload queue: {e}")
+
+    # Register persistent views for pending review buttons
+    try:
+        from automation.discord_notifier import PendingReviewView
+        from finance_core.pending_transactions import _load_pending_queue
+
+        queue = _load_pending_queue()
+
+        # Group pending by user to create one view per user
+        user_pending: dict = {}
+        for approval_id, item in queue.get("pending", {}).items():
+            uid = item["user_id"]
+            if uid not in user_pending:
+                user_pending[uid] = 0
+            user_pending[uid] += 1
+
+        if user_pending:
+            for user_id, count in user_pending.items():
+                view = PendingReviewView(user_id=user_id, pending_count=count)
+                bot.add_view(view)
+            logger.info(f"✅ Registered persistent review view(s) for {len(user_pending)} user(s)")
+        else:
+            logger.info("ℹ️ No pending reviews to register")
+    except Exception as e:
+        logger.error(f"❌ Failed to register persistent views: {e}")
     
     # Load the finance commands cog
     try:

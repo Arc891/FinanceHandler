@@ -146,11 +146,19 @@ async def process_csv_file(file_path: Optional[str], ctx_or_interaction: Union[d
                     auto_categorized_count["ai"] += 1
             else:
                 # Low confidence or no match - needs manual review
-                manual_needed.append(tx)
+                # Store transaction WITH the AI result to avoid re-categorizing
+                manual_needed.append({
+                    "transaction": tx,
+                    "ai_category": result.category,
+                    "ai_description": result.description,
+                    "ai_confidence": result.confidence
+                })
     except Exception as e:
         logger.error(f"Error during categorization loop: {e}", exc_info=True)
         # Save whatever we categorized so far before crashing
-        save_session(user_id, manual_needed, auto_income, auto_expenses)
+        # Extract raw transactions for session storage
+        raw_manual = [item["transaction"] if isinstance(item, dict) and "transaction" in item else item for item in manual_needed]
+        save_session(user_id, raw_manual, auto_income, auto_expenses)
         await send_message(ctx_or_interaction, f"❌ Error during categorization: {e}\nPartial progress saved. Use `/resume` to continue.", ephemeral=True)
         raise  # Re-raise to let caller handle
 
@@ -162,8 +170,9 @@ async def process_csv_file(file_path: Optional[str], ctx_or_interaction: Union[d
         await _upload_auto_categorized(user_id, auto_income, auto_expenses, ctx_or_interaction)
 
     # Save session with ONLY manual-needed transactions (auto ones are already uploaded)
-    # Clear income/expenses since they're uploaded
-    save_session(user_id, manual_needed, [], [])
+    # Extract raw transactions for session storage (manual_needed contains dicts with AI results)
+    raw_manual = [item["transaction"] for item in manual_needed]
+    save_session(user_id, raw_manual, [], [])
 
     # Show summary message
     summary = f"✅ Auto-categorized {total_auto}/{len(transactions)} transactions"
@@ -207,21 +216,97 @@ async def process_csv_file(file_path: Optional[str], ctx_or_interaction: Union[d
         logger.error(f"Failed to send summary message: {e}")
         # Continue anyway - upload and manual processing should still happen
 
-    # Start manual processing if needed
-    if manual_needed and isinstance(ctx_or_interaction, discord.Interaction):
+    # Handle low-confidence transactions
+    if manual_needed:
+        # Check if approval channel is configured for proactive Discord approvals
         try:
-            await start_transaction_prompt(ctx_or_interaction, user_id)
-        except Exception as e:
-            logger.error(f"Failed to start transaction prompt: {e}")
-            # If we can't start the prompt due to expired interaction, log instructions
-            logger.warning(f"User {user_id} should manually run /resume to continue categorization")
-    elif manual_needed:
-        # For legacy context
-        await send_message(ctx_or_interaction, "📊 Starting manual categorization. Use slash commands.")
+            from config.config_settings import APPROVAL_CHANNEL_ID
+        except ImportError:
+            APPROVAL_CHANNEL_ID = 0
+
+        if APPROVAL_CHANNEL_ID and APPROVAL_CHANNEL_ID > 0 and isinstance(ctx_or_interaction, discord.Interaction):
+            # Use new proactive Discord approval flow
+            await _send_approval_requests(
+                ctx_or_interaction,
+                manual_needed,
+                user_id,
+                total_auto
+            )
+            # Clear session since transactions are in pending queue
+            clear_session(user_id)
+        elif isinstance(ctx_or_interaction, discord.Interaction):
+            # Fall back to manual review UI
+            try:
+                await start_transaction_prompt(ctx_or_interaction, user_id)
+            except Exception as e:
+                logger.error(f"Failed to start transaction prompt: {e}")
+                logger.warning(f"User {user_id} should manually run /resume to continue categorization")
+        else:
+            # For legacy context
+            await send_message(ctx_or_interaction, "📊 Starting manual categorization. Use slash commands.")
 
     # Clear file once done
     if file_path and os.path.exists(file_path):
         os.remove(file_path)
+
+
+async def _send_approval_requests(
+    ctx_or_interaction: Union[discord.Interaction, commands.Context],
+    transactions_with_ai: list,
+    user_id: int,
+    auto_categorized_count: int
+) -> None:
+    """
+    Add low-confidence transactions to pending queue and send Discord approval requests.
+
+    Args:
+        ctx_or_interaction: Discord interaction or context
+        transactions_with_ai: List of dicts containing transaction + pre-computed AI results
+        user_id: Discord user ID
+        auto_categorized_count: Number of auto-categorized transactions (for summary)
+    """
+    from finance_core.pending_transactions import add_pending_transaction, get_user_pending_transactions
+    from automation.discord_notifier import send_approval_requests, send_batch_summary
+    from config.config_settings import APPROVAL_CHANNEL_ID
+
+    logger.info(f"Adding {len(transactions_with_ai)} transactions to pending approval queue")
+
+    # Add each transaction to pending queue (AI results already computed)
+    for item in transactions_with_ai:
+        tx = item["transaction"]
+        tx_type = "income" if tx.get("credit_debit_indicator") == "CRDT" else "expense"
+
+        add_pending_transaction(
+            user_id=user_id,
+            transaction=tx,
+            ai_category=item.get("ai_category"),
+            ai_description=item.get("ai_description"),
+            ai_confidence=item.get("ai_confidence", 0.0),
+            transaction_type=tx_type
+        )
+
+    # Get all pending transactions for this user
+    pending_txs = get_user_pending_transactions(user_id)
+
+    # Get the bot client from the interaction
+    if isinstance(ctx_or_interaction, discord.Interaction):
+        bot = ctx_or_interaction.client
+    else:
+        bot = ctx_or_interaction.bot
+
+    # Send approval requests to Discord
+    sent_count = await send_approval_requests(bot, pending_txs, APPROVAL_CHANNEL_ID)
+
+    # Send summary message
+    await send_batch_summary(
+        bot=bot,
+        channel_id=APPROVAL_CHANNEL_ID,
+        auto_categorized=auto_categorized_count,
+        needs_approval=len(pending_txs),
+        user_id=user_id
+    )
+
+    logger.info(f"Sent {sent_count} approval requests to channel {APPROVAL_CHANNEL_ID}")
 
 
 async def _upload_auto_categorized(

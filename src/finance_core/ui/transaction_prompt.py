@@ -113,9 +113,18 @@ class TransactionView(View):
         self.transaction = transaction
         self.transaction_type = "income" if transaction["credit_debit_indicator"] == "CRDT" else "expense"
         self.custom_description = None
-        
-        # Apply categorization rules to get smart defaults
-        suggested_category, suggested_description = apply_categorization_rules(transaction)
+
+        # Check for AI suggestion first (from pending approval flow)
+        ai_suggestion = transaction.get("_ai_suggestion")
+        if ai_suggestion and ai_suggestion.get("category"):
+            suggested_category = ai_suggestion["category"]
+            suggested_description = ai_suggestion.get("description", "")
+            self.suggestion_source = "ai"
+        else:
+            # Fall back to regex categorization rules
+            suggested_category, suggested_description = apply_categorization_rules(transaction)
+            self.suggestion_source = "regex" if suggested_category else None
+
         self.selected_category = suggested_category
         self.suggested_description = suggested_description
 
@@ -540,14 +549,26 @@ async def start_transaction_prompt(interaction: discord.Interaction, user_id: in
     processed = len(income) + len(expenses)
     embed.add_field(name="📈 Progress", value=f"{processed}/{total_transactions} completed", inline=True)
 
-    # Check if auto-categorization found a match
-    suggested_category, suggested_description = apply_categorization_rules(tx)
-    if suggested_category:
-        embed.add_field(name="🤖 Smart Suggestion", value=f"**{suggested_category}**\n{suggested_description}", inline=False)
+    # Check for AI suggestion first, then fall back to regex
+    ai_suggestion = tx.get("_ai_suggestion")
+    if ai_suggestion and ai_suggestion.get("category"):
+        suggested_category = ai_suggestion["category"]
+        suggested_description = ai_suggestion.get("description", "")
+        confidence = ai_suggestion.get("confidence", 0)
+        confidence_pct = int(confidence * 100) if confidence else 0
+        embed.add_field(
+            name="🤖 AI Suggestion",
+            value=f"**{suggested_category}**\n{suggested_description}\n*Confidence: {confidence_pct}%*",
+            inline=False
+        )
+    else:
+        suggested_category, suggested_description = apply_categorization_rules(tx)
+        if suggested_category:
+            embed.add_field(name="✨ Regex Match", value=f"**{suggested_category}**\n{suggested_description}", inline=False)
 
     # Add workflow info
     workflow_text = "1️⃣ Select category → 2️⃣ Click **Confirm & Add Description** → 3️⃣ Review/edit description\n\n⏭️ **Skip Transaction** if already processed manually\n📦 **Cache for Later** to save with dummy data for later processing"
-    if suggested_category:
+    if suggested_category or ai_suggestion:
         workflow_text += "\n\n✨ *Category and description pre-filled based on transaction data*"
     
     embed.add_field(

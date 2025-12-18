@@ -2,6 +2,30 @@
 
 ## Recent Changes
 
+### Discord Approval UI - Session 3 (2025-12-17)
+
+**Proactive Discord Approval Flow**:
+- Low-confidence transactions sent to private thread (`Approvals-{username}`) for approval
+- Single "Start Review" button launches familiar ephemeral 1-by-1 transaction flow
+- AI suggestions work like regex matches: pre-selected category, pre-filled description
+- Persistent buttons work even after bot restart
+
+**New Files**:
+- `src/finance_core/pending_transactions.py` - Manages approval queue with JSON persistence
+- `src/automation/discord_notifier.py` - Private threads and PendingReviewView
+
+**Configuration**:
+- Added `APPROVAL_CHANNEL_ID` to `config_settings.py` - Set to your approval channel
+- Added `PENDING_APPROVALS_FILE` for queue persistence
+
+**How It Works**:
+1. Upload CSV via `/upload` command
+2. High-confidence transactions (regex + AI ≥75%) upload automatically
+3. Low-confidence transactions queued and notification sent to private thread
+4. User clicks "Start Review" to launch ephemeral transaction-by-transaction flow
+5. Each transaction shows AI suggestion with confidence %, user confirms/edits/skips
+6. Approved transactions upload to Google Sheets
+
 ### Auto-Upload Fix & Sorting Feature (2025-12-17)
 
 **Auto-Categorized Transaction Upload Fix**:

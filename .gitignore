@@ -78,6 +78,7 @@ data/sessions/
 data/uploads/
 data/bank_downloads/
 data/bank_session.json
+data/pending_approvals.json
 data/browser_profile/
 *.csv
 *.xlsx
