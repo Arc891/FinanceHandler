@@ -99,18 +99,18 @@ import discord
 
 class TransactionProcessor:
     """Handles processing of financial transactions."""
-    
+
     def __init__(self, user_id: int) -> None:
         self.user_id = user_id
         self.transactions: List[Dict[str, Any]] = []
-    
+
     async def process_transaction(self, transaction: Dict[str, Any]) -> bool:
         """
         Process a single transaction.
-        
+
         Args:
             transaction: Transaction data dictionary
-            
+
         Returns:
             True if processing was successful
         """

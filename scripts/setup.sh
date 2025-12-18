@@ -73,6 +73,15 @@ mkdir -p data/uploads
 mkdir -p data/sessions
 mkdir -p src/config
 
+# Install pre-commit hooks
+echo "🔧 Installing pre-commit hooks..."
+if command -v pre-commit &> /dev/null; then
+    pre-commit install
+    echo "✅ Pre-commit hooks installed"
+else
+    echo "⚠️ pre-commit not found. Run 'pip install pre-commit && pre-commit install' manually"
+fi
+
 echo ""
 echo "🎉 Setup complete!"
 echo ""

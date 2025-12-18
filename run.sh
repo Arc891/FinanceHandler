@@ -67,7 +67,7 @@ try:
 except:
     print('')
 " 2>/dev/null)
-    
+
     if [[ -z "$DISCORD_TOKEN_VALUE" ]]; then
         echo "❌ Error: No valid Discord token found in config_settings.py"
         echo "Please ensure DISCORD_TOKEN is properly set in your config"
@@ -125,7 +125,7 @@ echo "✅ Finance Automation Bot deployed successfully!"
 echo ""
 echo "📋 Management commands:"
 echo "  View logs:    docker logs finance-automation-bot"
-echo "  Stop bot:     docker stop finance-automation-bot"  
+echo "  Stop bot:     docker stop finance-automation-bot"
 echo "  Start bot:    docker start finance-automation-bot"
 echo "  Restart bot:  docker restart finance-automation-bot"
 echo ""

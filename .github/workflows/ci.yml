@@ -12,7 +12,7 @@ jobs:
     strategy:
       matrix:
         python-version: [3.8, 3.9, "3.10", "3.11"]
-    
+
     env:
       # Mask any potential token-like values in logs
       DISCORD_TOKEN: "placeholder_token_for_ci"
@@ -56,7 +56,7 @@ jobs:
         run: |
           cp src/config_settings.example.py src/config_settings.py
           echo "✅ Configuration file created from template"
-          
+
           # Ensure no real secrets are in the template
           if grep -q "your_discord_token_here" src/config_settings.py; then
             echo "✅ Using safe placeholder values"
@@ -71,7 +71,7 @@ jobs:
           import sys
           import os
           sys.path.append('src')
-          
+
           try:
               from config_settings import *
               print('✅ Config imports successful')
@@ -176,21 +176,21 @@ jobs:
       - name: Check for secrets
         run: |
           echo "🔍 Checking for potential secrets in codebase..."
-          
+
           # Check if any actual secrets might be committed (not in example files)
           if grep -r "discord_token\|bot_token\|api_key" src/ --exclude-dir=__pycache__ --exclude="*.example.*" --exclude="config_settings.py"; then
             echo "⚠️ Potential secrets found in code"
           else
             echo "✅ No obvious secrets found"
           fi
-          
+
           # Check for hardcoded tokens or keys
           if grep -rE "(token|key|secret|password)\s*=\s*['\"](sk-[A-Za-z0-9]{32,}|ghp_[A-Za-z0-9]{36,}|xoxb-[A-Za-z0-9-]{48,}|[A-Za-z0-9]{40,})['\"]" src/ --exclude-dir=__pycache__ --exclude="*.example.*"; then
             echo "⚠️ Potential hardcoded credentials found"
           else
             echo "✅ No hardcoded credentials detected"
           fi
-          
+
           # Verify .env file is not committed
           if [ -f ".env" ]; then
             echo "❌ .env file should not be committed"
@@ -198,7 +198,7 @@ jobs:
           else
             echo "✅ .env file not found in repository (good)"
           fi
-          
+
           # Check gitignore for sensitive files
           if grep -q "\.env\|config_settings\.py\|google_service_account\.json" .gitignore 2>/dev/null; then
             echo "✅ Sensitive files properly ignored in .gitignore"
@@ -212,16 +212,16 @@ jobs:
           import sys
           import os
           sys.path.append('src')
-          
+
           # Test that config uses environment variables properly
           from config_settings import DISCORD_TOKEN, GOOGLE_CREDENTIALS_PATH
-          
+
           # Ensure default values are placeholders, not real secrets
           if DISCORD_TOKEN and DISCORD_TOKEN != 'your_discord_token_here' and len(DISCORD_TOKEN) > 50:
               print('❌ DISCORD_TOKEN appears to contain a real token')
               sys.exit(1)
           else:
               print('✅ DISCORD_TOKEN is using placeholder/env var')
-              
+
           print('✅ Environment configuration validation passed')
           "

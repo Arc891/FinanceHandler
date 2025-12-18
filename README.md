@@ -52,7 +52,7 @@
    ```bash
    # Copy configuration template
    cp src/config/config_settings.example.py src/config/config_settings.py
-   
+
    # Edit config_settings.py with your values
    nano src/config/config_settings.py
    ```
@@ -65,9 +65,9 @@
    - Enable required intents: Message Content, Server Members
 
 6. **Set up Google Sheets (Optional)**
-   
+
    If you want to export transactions to Google Sheets:
-   
+
    a. Go to [Google Cloud Console](https://console.cloud.google.com/)
    b. Create a new project or select an existing one
    c. Enable the Google Sheets API and Google Drive API
