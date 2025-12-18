@@ -26,7 +26,7 @@ def _get_pending_file_path() -> str:
         return os.path.join(base_dir, "data", "pending_approvals.json")
 
 
-def _load_pending_queue() -> Dict[str, Any]:
+def load_pending_queue() -> Dict[str, Any]:
     """Load the pending approvals queue from disk."""
     file_path = _get_pending_file_path()
     if os.path.exists(file_path):
@@ -72,7 +72,7 @@ def add_pending_transaction(
     Returns:
         approval_id: Unique ID for this pending approval
     """
-    queue = _load_pending_queue()
+    queue = load_pending_queue()
 
     approval_id = str(uuid.uuid4())[:8]  # Short UUID for display
 
@@ -108,7 +108,7 @@ def set_message_id(approval_id: str, message_id: int) -> bool:
     Returns:
         True if successful, False if approval not found
     """
-    queue = _load_pending_queue()
+    queue = load_pending_queue()
 
     if approval_id not in queue["pending"]:
         logger.warning(f"Approval {approval_id} not found when setting message_id")
@@ -130,7 +130,7 @@ def set_thread_id(approval_id: str, thread_id: int) -> bool:
     Returns:
         True if successful, False if approval not found
     """
-    queue = _load_pending_queue()
+    queue = load_pending_queue()
 
     if approval_id not in queue["pending"]:
         logger.warning(f"Approval {approval_id} not found when setting thread_id")
@@ -151,7 +151,7 @@ def get_pending_by_message_id(message_id: int) -> Optional[Dict[str, Any]]:
     Returns:
         Pending item dict or None if not found
     """
-    queue = _load_pending_queue()
+    queue = load_pending_queue()
 
     for approval_id, item in queue["pending"].items():
         if item.get("message_id") == message_id:
@@ -170,7 +170,7 @@ def get_pending_by_id(approval_id: str) -> Optional[Dict[str, Any]]:
     Returns:
         Pending item dict or None if not found
     """
-    queue = _load_pending_queue()
+    queue = load_pending_queue()
     return queue["pending"].get(approval_id)
 
 
@@ -184,7 +184,7 @@ def get_user_pending_transactions(user_id: int) -> List[Dict[str, Any]]:
     Returns:
         List of pending transaction dicts
     """
-    queue = _load_pending_queue()
+    queue = load_pending_queue()
     return [
         item for item in queue["pending"].values()
         if item["user_id"] == user_id and item["status"] == "pending"
@@ -209,7 +209,7 @@ def approve_transaction(
     Returns:
         Tuple of (success, transaction_data for upload)
     """
-    queue = _load_pending_queue()
+    queue = load_pending_queue()
 
     if approval_id not in queue["pending"]:
         logger.warning(f"Approval {approval_id} not found")
@@ -250,7 +250,7 @@ def reject_transaction(approval_id: str, rejected_by: int) -> Tuple[bool, Option
     Returns:
         Tuple of (success, info dict with message_id/thread_id for cleanup)
     """
-    queue = _load_pending_queue()
+    queue = load_pending_queue()
 
     if approval_id not in queue["pending"]:
         logger.warning(f"Approval {approval_id} not found")
@@ -283,7 +283,7 @@ def get_pending_count(user_id: Optional[int] = None) -> int:
     Returns:
         Number of pending approvals
     """
-    queue = _load_pending_queue()
+    queue = load_pending_queue()
 
     if user_id is None:
         return len(queue["pending"])
@@ -304,7 +304,7 @@ def clear_user_pending(user_id: int) -> int:
     Returns:
         Number of items cleared
     """
-    queue = _load_pending_queue()
+    queue = load_pending_queue()
 
     to_remove = [
         aid for aid, item in queue["pending"].items()
@@ -326,7 +326,7 @@ def cleanup_processed_list() -> int:
     Returns:
         Number of entries removed
     """
-    queue = _load_pending_queue()
+    queue = load_pending_queue()
 
     old_count = len(queue.get("processed", []))
     queue["processed"] = []  # Clear all processed

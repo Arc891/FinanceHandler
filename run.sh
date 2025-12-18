@@ -87,7 +87,6 @@ ACTUAL_USER_HOME="${ACTUAL_USER_HOME:-$HOME}"
 DOCKER_RUN_ARGS=(
     # Mount volumes for persistent data
     -v "$(pwd)/data:/app/data"
-    -v "$(pwd)/config:/app/config"
 
     # Mount Claude Code CLI for AI categorization
     # Executable is read-only, config needs write access for logs/cache

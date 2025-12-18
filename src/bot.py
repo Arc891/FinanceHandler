@@ -85,10 +85,10 @@ async def on_ready():
 
     # Register persistent views for pending review buttons
     try:
-        from automation.discord_notifier import PendingReviewView
-        from finance_core.pending_transactions import _load_pending_queue
+        from finance_core.ui.discord_notifier import PendingReviewView
+        from finance_core.pending_transactions import load_pending_queue
 
-        queue = _load_pending_queue()
+        queue = load_pending_queue()
 
         # Group pending by user to create one view per user
         user_pending: dict = {}

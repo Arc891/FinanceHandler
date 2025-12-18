@@ -107,14 +107,13 @@ API_SECRET_KEY = os.environ.get('API_SECRET_KEY', 'change-me-in-production')
 
 # Ensure directories exist
 # Create absolute paths relative to project root
-_project_root = os.path.dirname(os.path.dirname(__file__))
+# __file__ = src/config/config_settings.py, so go up 3 levels to reach project root
+_project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
 _upload_path = os.path.join(_project_root, UPLOAD_DIR)
-_config_path = os.path.join(os.path.dirname(__file__), "config")
 _bank_download_path = os.path.join(_project_root, BANK_DOWNLOAD_DIR)
 _bank_session_dir = os.path.dirname(os.path.join(_project_root, BANK_SESSION_FILE))
 
 os.makedirs(_upload_path, exist_ok=True)
-os.makedirs(_config_path, exist_ok=True)
 os.makedirs(_bank_download_path, exist_ok=True)
 os.makedirs(_bank_session_dir, exist_ok=True)
 

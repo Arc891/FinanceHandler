@@ -266,7 +266,7 @@ async def _send_approval_requests(
         auto_categorized_count: Number of auto-categorized transactions (for summary)
     """
     from finance_core.pending_transactions import add_pending_transaction, get_user_pending_transactions
-    from automation.discord_notifier import send_approval_requests, send_batch_summary
+    from finance_core.ui.discord_notifier import send_approval_requests, send_batch_summary
     from config.config_settings import APPROVAL_CHANNEL_ID
 
     logger.info(f"Adding {len(transactions_with_ai)} transactions to pending approval queue")

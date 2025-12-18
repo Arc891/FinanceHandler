@@ -1,4 +1,4 @@
-# automation/discord_notifier.py
+# finance_core/ui/discord_notifier.py
 """
 Sends transaction approval requests to Discord via private threads.
 Uses a single summary message with a "Start Review" button that launches
