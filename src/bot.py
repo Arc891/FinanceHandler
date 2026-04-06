@@ -1,5 +1,6 @@
 # Modern bot.py - Updated to work with slash commands and bot_commands.py
 
+import os
 import discord
 from discord.ext import commands, tasks
 import asyncio
@@ -114,6 +115,29 @@ async def on_ready():
             logger.info("ℹ️ No pending reviews to register")
     except Exception as e:
         logger.error(f"❌ Failed to register persistent views: {e}")
+
+    # Register persistent BatchReviewView for users with session remaining
+    try:
+        import glob
+        from finance_core.ui.discord_notifier import BatchReviewView
+        from finance_core.session_management import SESSION_DIR, load_session
+
+        batch_registered = 0
+        for session_file in glob.glob(os.path.join(SESSION_DIR, "*.json")):
+            try:
+                uid = int(os.path.basename(session_file).replace(".json", ""))
+                remaining, _, _ = load_session(uid)
+                if remaining:
+                    view = BatchReviewView(user_id=uid, transaction_count=len(remaining))
+                    bot.add_view(view)
+                    batch_registered += 1
+            except (ValueError, Exception) as e:
+                logger.debug(f"Skipping session file {session_file}: {e}")
+
+        if batch_registered:
+            logger.info(f"✅ Registered BatchReviewView for {batch_registered} user(s)")
+    except Exception as e:
+        logger.error(f"❌ Failed to register batch review views: {e}")
 
     # Load the finance commands cog
     try:

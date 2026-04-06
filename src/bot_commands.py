@@ -254,6 +254,131 @@ class FinanceBot(commands.Cog):
         response = await interaction.original_response()
         asyncio.create_task(self._delete_after_delay(response, 60))
 
+    @app_commands.command(name="pending",
+                          description="Resend notification for pending approval transactions")
+    async def pending(self, interaction: discord.Interaction):
+        """Show batch review overview for pending/remaining transactions."""
+        user_id = interaction.user.id
+
+        try:
+            from finance_core.pending_transactions import (
+                get_user_pending_transactions, clear_user_pending
+            )
+            from finance_core.session_management import load_session, save_session
+            from finance_core.ui.discord_notifier import (
+                get_or_create_user_thread,
+                create_transaction_overview_embed,
+                BatchReviewView
+            )
+            from config.config_settings import REMINDER_CHANNEL_ID
+
+            # Merge pending queue items into session remaining
+            pending_queue = get_user_pending_transactions(user_id)
+            if pending_queue:
+                transactions_for_session = []
+                for item in pending_queue:
+                    tx = item["transaction"].copy()
+                    if item.get("ai_category"):
+                        tx["_ai_suggestion"] = {
+                            "category": item["ai_category"],
+                            "description": item.get("ai_description", ""),
+                            "confidence": item.get("ai_confidence", 0)
+                        }
+                    transactions_for_session.append(tx)
+
+                existing_remaining, existing_income, existing_expenses = load_session(user_id)
+                all_remaining = transactions_for_session + existing_remaining
+                save_session(user_id, all_remaining, existing_income, existing_expenses)
+                clear_user_pending(user_id)
+                logger.info(f"Merged {len(pending_queue)} pending queue items into session for user {user_id}")
+
+            # Load unified remaining list
+            remaining, _, _ = load_session(user_id)
+
+            if not remaining:
+                await interaction.response.send_message(
+                    "✅ No pending transactions to review.", ephemeral=True)
+                response = await interaction.original_response()
+                asyncio.create_task(self._delete_after_delay(response, 3))
+                return
+
+            await interaction.response.send_message(
+                f"📤 Sending overview for {len(remaining)} transactions...",
+                ephemeral=True)
+
+            # Get or create thread and send notification
+            channel = self.bot.get_channel(REMINDER_CHANNEL_ID)
+            if not channel:
+                await interaction.edit_original_response(
+                    content="❌ Could not find approval channel.")
+                return
+
+            thread = await get_or_create_user_thread(channel, user_id, self.bot)
+            if not thread:
+                await interaction.edit_original_response(
+                    content="❌ Could not create approval thread.")
+                return
+
+            embed = create_transaction_overview_embed(remaining, user_id)
+            view = BatchReviewView(user_id, len(remaining))
+            await thread.send(embed=embed, view=view)
+
+            await interaction.edit_original_response(
+                content=f"✅ Sent! Check your thread for {len(remaining)} transactions.")
+            response = await interaction.original_response()
+            asyncio.create_task(self._delete_after_delay(response, 5))
+
+        except Exception as e:
+            logger.error(f"Error in /pending command: {e}", exc_info=True)
+            await interaction.edit_original_response(
+                content=f"❌ Error: {str(e)}")
+
+    @app_commands.command(name="resetsheet",
+                          description="Reset Google Sheets connection and re-detect row positions")
+    async def resetsheet(self, interaction: discord.Interaction):
+        """Reset the sheet exporter and re-detect row positions (owner only)"""
+        user_id = interaction.user.id
+
+        # Access control: only bot owners (from MENTION_USER_IDS) can use this
+        try:
+            from config.config_settings import MENTION_USER_IDS
+            if user_id not in MENTION_USER_IDS:
+                await interaction.response.send_message(
+                    "❌ Only bot owners can use this command.", ephemeral=True)
+                response = await interaction.original_response()
+                asyncio.create_task(self._delete_after_delay(response, 5))
+                return
+        except ImportError:
+            pass  # If config unavailable, allow anyone (dev mode)
+
+        await interaction.response.send_message(
+            "🔄 Resetting Google Sheets connection...", ephemeral=True)
+
+        try:
+            from finance_core.background_upload import get_upload_queue
+
+            queue = get_upload_queue()
+
+            # Reset the exporter (forces full reconnection)
+            if queue.exporter:
+                queue.exporter.sheet = None
+                queue.exporter.client = None
+
+            # Reset and re-detect positions
+            queue.reset_row_positions(user_id)
+
+            result_msg = "✅ Sheet connection reset!\n"
+            result_msg += f"📍 Detected positions: expenses=row {queue.current_expense_row}, income=row {queue.current_income_row}"
+
+            await interaction.edit_original_response(content=result_msg)
+            response = await interaction.original_response()
+            asyncio.create_task(self._delete_after_delay(response, 15))
+
+        except Exception as e:
+            logger.error(f"Error in /resetsheet command: {e}", exc_info=True)
+            await interaction.edit_original_response(
+                content=f"❌ Error: {str(e)}")
+
     @app_commands.command(name="sort",
                           description="Sort all transactions in Google Sheets by date")
     async def sort_sheet(self, interaction: discord.Interaction):

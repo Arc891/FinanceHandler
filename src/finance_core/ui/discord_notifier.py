@@ -5,12 +5,22 @@ Uses a single summary message with a "Start Review" button that launches
 the existing ephemeral transaction flow.
 """
 
+import asyncio
 import discord
 from discord import ui
 import logging
 from typing import Dict, Any, Optional, List
 
 logger = logging.getLogger(__name__)
+
+
+def _get_counterparty_name(tx: Dict[str, Any]) -> str:
+    """Extract counterparty name from transaction with fallback chain."""
+    name = tx.get("debtor", {}).get("name", "") or tx.get("creditor", {}).get("name", "")
+    if not name.strip():
+        remittance = tx.get("remittance_information", [])
+        name = remittance[0][:60] if remittance else "Unknown"
+    return name.strip() or "Unknown"
 
 
 class PendingReviewView(ui.View):
@@ -355,3 +365,268 @@ async def send_batch_summary(
         )
 
     await thread.send(embed=embed)
+
+
+def create_transaction_overview_embed(
+    transactions: List[Dict[str, Any]],
+    user_id: int
+) -> discord.Embed:
+    """Create an embed listing all transactions with AI suggestions for batch review."""
+    embed = discord.Embed(
+        title=f"🔍 {len(transactions)} Transactions Need Review",
+        color=discord.Color.orange()
+    )
+
+    lines = []
+    total_expense = 0.0
+    total_income = 0.0
+    max_display = 40
+
+    for i, tx in enumerate(transactions, 1):
+        if i > max_display:
+            lines.append(f"\n... and {len(transactions) - max_display} more")
+            break
+
+        date = tx.get("booking_date", "??-??")[:5]
+        amount_str = tx.get("transaction_amount", {}).get("amount", "0")
+        try:
+            amount = float(amount_str)
+        except ValueError:
+            amount = 0.0
+        is_income = tx.get("credit_debit_indicator") == "CRDT"
+        emoji = "💵" if is_income else "💸"
+
+        if is_income:
+            total_income += abs(amount)
+        else:
+            total_expense += abs(amount)
+
+        counterparty = _get_counterparty_name(tx)
+        if len(counterparty) > 22:
+            counterparty = counterparty[:20] + ".."
+
+        ai = tx.get("_ai_suggestion", {})
+        ai_cat = ai.get("category", "—")
+        ai_conf = int(ai.get("confidence", 0) * 100)
+
+        lines.append(
+            f"{emoji} `{date}` **{amount_str}** {counterparty}\n"
+            f"      → _{ai_cat}_ ({ai_conf}%)"
+        )
+
+    embed.description = "\n".join(lines)
+
+    embed.add_field(
+        name="💰 Totals",
+        value=f"Expenses: €{total_expense:.2f} | Income: €{total_income:.2f}",
+        inline=False
+    )
+
+    embed.set_footer(text=f"User: {user_id}")
+    return embed
+
+
+class BatchReviewView(ui.View):
+    """View with batch action buttons for processing remaining transactions."""
+
+    def __init__(self, user_id: int, transaction_count: int):
+        super().__init__(timeout=None)
+        self.user_id = user_id
+        self.transaction_count = transaction_count
+
+        accept_ai_btn = ui.Button(
+            label=f"Accept All - AI ({transaction_count})",
+            style=discord.ButtonStyle.success,
+            emoji="🤖",
+            custom_id=f"batch_accept_ai:{user_id}"
+        )
+        accept_ai_btn.callback = self.batch_accept_ai
+        self.add_item(accept_ai_btn)
+
+        accept_placeholder_btn = ui.Button(
+            label="Accept All - Placeholder",
+            style=discord.ButtonStyle.secondary,
+            emoji="📦",
+            custom_id=f"batch_accept_placeholder:{user_id}"
+        )
+        accept_placeholder_btn.callback = self.batch_accept_placeholder
+        self.add_item(accept_placeholder_btn)
+
+        start_btn = ui.Button(
+            label="Start Review",
+            style=discord.ButtonStyle.primary,
+            emoji="📋",
+            custom_id=f"batch_start_review:{user_id}"
+        )
+        start_btn.callback = self.start_review
+        self.add_item(start_btn)
+
+        skip_btn = ui.Button(
+            label="Skip All",
+            style=discord.ButtonStyle.danger,
+            emoji="⏭️",
+            custom_id=f"batch_skip_all:{user_id}"
+        )
+        skip_btn.callback = self.skip_all
+        self.add_item(skip_btn)
+
+    async def batch_accept_ai(self, interaction: discord.Interaction):
+        """Batch accept all transactions with AI-suggested categories."""
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message(
+                "You can only manage your own transactions.", ephemeral=True)
+            return
+
+        await interaction.response.defer(ephemeral=True)
+
+        from finance_core.session_management import load_session, save_session
+        from finance_core.background_upload import (
+            queue_transaction_upload, get_upload_queue,
+            sort_sheet_after_uploads_async
+        )
+
+        remaining, income, expenses = load_session(self.user_id)
+
+        if not remaining:
+            await interaction.followup.send(
+                "Already processed - no remaining transactions.", ephemeral=True)
+            return
+
+        # Ensure upload queue is running
+        queue = get_upload_queue()
+        if not queue.is_running:
+            queue.start()
+
+        queued = 0
+        for tx in remaining:
+            ai = tx.get("_ai_suggestion", {})
+            upload_tx = tx.copy()
+            upload_tx.pop("_ai_suggestion", None)
+            upload_tx["category"] = ai.get("category", "! Nog in te delen !")
+            upload_tx["description"] = ai.get("description") or _get_counterparty_name(tx)
+
+            tx_type = "income" if tx.get("credit_debit_indicator") == "CRDT" else "expense"
+            queue_transaction_upload(upload_tx, tx_type, self.user_id)
+            queued += 1
+
+        save_session(self.user_id, [], income, expenses)
+
+        await self._update_message_batch_complete(
+            interaction, queued, "AI suggestions")
+        await interaction.followup.send(
+            f"✅ Queued {queued} transactions for upload with AI categories. "
+            "Uploading in background...", ephemeral=True)
+
+        task = asyncio.create_task(sort_sheet_after_uploads_async(timeout=120.0))
+        task.add_done_callback(lambda t: t.exception() if not t.cancelled() else None)
+
+    async def batch_accept_placeholder(self, interaction: discord.Interaction):
+        """Batch accept all transactions with '! Nog in te delen !' category."""
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message(
+                "You can only manage your own transactions.", ephemeral=True)
+            return
+
+        await interaction.response.defer(ephemeral=True)
+
+        from finance_core.session_management import load_session, save_session
+        from finance_core.background_upload import (
+            queue_transaction_upload, get_upload_queue,
+            sort_sheet_after_uploads_async
+        )
+
+        remaining, income, expenses = load_session(self.user_id)
+
+        if not remaining:
+            await interaction.followup.send(
+                "Already processed - no remaining transactions.", ephemeral=True)
+            return
+
+        queue = get_upload_queue()
+        if not queue.is_running:
+            queue.start()
+
+        queued = 0
+        for tx in remaining:
+            upload_tx = tx.copy()
+            upload_tx.pop("_ai_suggestion", None)
+            upload_tx["category"] = "! Nog in te delen !"
+            upload_tx["description"] = _get_counterparty_name(tx)
+
+            tx_type = "income" if tx.get("credit_debit_indicator") == "CRDT" else "expense"
+            queue_transaction_upload(upload_tx, tx_type, self.user_id)
+            queued += 1
+
+        save_session(self.user_id, [], income, expenses)
+
+        await self._update_message_batch_complete(
+            interaction, queued, "! Nog in te delen !")
+        await interaction.followup.send(
+            f"✅ Queued {queued} transactions for upload as placeholder. "
+            "Uploading in background...", ephemeral=True)
+
+        task = asyncio.create_task(sort_sheet_after_uploads_async(timeout=120.0))
+        task.add_done_callback(lambda t: t.exception() if not t.cancelled() else None)
+
+    async def start_review(self, interaction: discord.Interaction):
+        """Start one-by-one review of remaining transactions."""
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message(
+                "You can only manage your own transactions.", ephemeral=True)
+            return
+
+        from finance_core.ui.transaction_prompt import start_transaction_prompt
+
+        # Update thread message to show in progress
+        embed = discord.Embed(
+            title="📋 Review In Progress",
+            description="Reviewing transactions one by one...\n\nCheck your ephemeral messages below.",
+            color=discord.Color.blue()
+        )
+        for item in self.children:
+            item.disabled = True
+        try:
+            await interaction.message.edit(embed=embed, view=self)
+        except Exception:
+            pass
+
+        await interaction.response.defer(ephemeral=True)
+        await start_transaction_prompt(interaction, self.user_id)
+
+    async def skip_all(self, interaction: discord.Interaction):
+        """Skip all remaining transactions."""
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message(
+                "You can only manage your own transactions.", ephemeral=True)
+            return
+
+        from finance_core.session_management import load_session, save_session
+
+        remaining, income, expenses = load_session(self.user_id)
+        count = len(remaining)
+        save_session(self.user_id, [], income, expenses)
+
+        embed = discord.Embed(
+            title="⏭️ All Skipped",
+            description=f"Skipped {count} transaction(s).",
+            color=discord.Color.dark_grey()
+        )
+        for item in self.children:
+            item.disabled = True
+        await interaction.response.edit_message(embed=embed, view=self)
+
+    async def _update_message_batch_complete(
+            self, interaction: discord.Interaction, count: int, method: str):
+        """Update thread message to show batch upload complete."""
+        embed = discord.Embed(
+            title="✅ Batch Upload Complete",
+            description=f"Uploaded {count} transaction(s) using **{method}**.\n\n"
+                        "Sheet will be sorted automatically.",
+            color=discord.Color.green()
+        )
+        for item in self.children:
+            item.disabled = True
+        try:
+            await interaction.message.edit(embed=embed, view=self)
+        except Exception:
+            pass
