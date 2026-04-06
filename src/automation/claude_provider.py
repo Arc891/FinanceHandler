@@ -103,13 +103,19 @@ class ClaudeProvider:
                 "No Claude access available. Install Claude Code or provide API key."
             )
 
-    async def _complete_cli(self, prompt: str) -> str:
+    async def _complete_cli(self, prompt: str, **kwargs) -> str:
         """
         Complete using Claude Code CLI (async version).
 
-        Note: First-time CLI usage may require interactive approval.
+        Note: CLI does not support temperature or max_tokens parameters.
+        First-time CLI usage may require interactive approval.
         Test manually first: claude -p "test prompt"
         """
+        if kwargs.get('temperature') or kwargs.get('max_tokens'):
+            logger.debug(
+                "CLI path: temperature and max_tokens params are ignored "
+                "(not supported by claude -p)")
+
         try:
             cmd = [
                 "claude", "-p", prompt,
@@ -188,9 +194,9 @@ class ClaudeProvider:
         try:
             # Map model alias to full API model name
             model_map = {
-                "haiku": "claude-3-5-haiku-20241022",
-                "sonnet": "claude-3-5-sonnet-20241022",
-                "opus": "claude-opus-4-5-20251101"
+                "haiku": "claude-haiku-4-5-20251001",
+                "sonnet": "claude-sonnet-4-6-20250514",
+                "opus": "claude-opus-4-6-20250514"
             }
             api_model = model_map.get(self.model, "claude-3-5-haiku-20241022")
 

@@ -65,11 +65,9 @@ async def process_csv_file(
     # Check if AI categorization is available
     try:
         from finance_core.categorization_engine import create_categorization_engine
-        from automation.claude_provider import ClaudeProvider
 
-        # Auto-enable AI if Claude CLI detected (5C)
-        provider = ClaudeProvider(api_key=None, model="haiku")
-        ai_enabled = provider.use_cli or provider.api_client is not None
+        engine = create_categorization_engine(ai_enabled=True)
+        ai_enabled = engine.ai_enabled
 
         if ai_enabled:
             logger.info(
@@ -77,8 +75,6 @@ async def process_csv_file(
         else:
             logger.info(
                 "AI categorization disabled - only regex matching available")
-
-        engine = create_categorization_engine(ai_enabled=ai_enabled)
     except Exception as e:
         logger.warning(
             f"Failed to initialize categorization engine: {e}. Falling back to manual mode.")
@@ -92,9 +88,9 @@ async def process_csv_file(
             os.remove(file_path)
         return
 
-    # Categorize all transactions with progress feedback
+    # Batch categorize all transactions
     logger.info(
-        f"Processing {len(transactions)} transactions with categorization engine")
+        f"Processing {len(transactions)} transactions with batch categorization engine")
     auto_categorized_count = {"regex": 0, "ai": 0}
     manual_needed = []
     auto_income = []
@@ -104,46 +100,42 @@ async def process_csv_file(
     await send_message(ctx_or_interaction, "🔄 Categorizing transactions...", ephemeral=True)
 
     try:
-        for i, tx in enumerate(transactions, 1):
-            result = await engine.categorize(tx)
+        results = await engine.batch_categorize(transactions)
 
-            # Update progress every 5 transactions or on AI categorization
-            if i % 5 == 0 or result.method == 'ai_auto':
-                progress_text = f"🔄 Processing {i}/{len(transactions)} transactions..."
-                if result.method == 'ai_auto':
-                    progress_text += f" (🤖 AI: {result.category})"
+        # Update progress
+        try:
+            if isinstance(ctx_or_interaction, discord.Interaction):
+                await ctx_or_interaction.edit_original_response(
+                    content=f"🔄 Processing {len(results)} categorized transactions...")
+        except BaseException:
+            pass
 
-                # Update progress message
-                try:
-                    if isinstance(ctx_or_interaction, discord.Interaction):
-                        await ctx_or_interaction.edit_original_response(content=progress_text)
-                except BaseException:
-                    pass  # Ignore if message update fails
+        for i, (tx, result) in enumerate(zip(transactions, results)):
+            # Build final description with relationship suffix
+            final_desc = result.description or ""
+            if result.description_suffix:
+                final_desc = f"{final_desc} {result.description_suffix}".strip()
 
             if result.method in ['regex', 'ai_auto']:
-                # High confidence - store for later upload
                 tx_type = "income" if tx.get(
                     "credit_debit_indicator") == "CRDT" else "expense"
 
-                # Create categorized transaction
                 categorized_tx = {
                     **tx,
                     "category": result.category,
-                    "description": result.description
+                    "description": final_desc
                 }
 
-                # Store in session (will upload after sorting)
                 if tx_type == "income":
                     auto_income.append(categorized_tx)
                 else:
                     auto_expenses.append(categorized_tx)
 
-                # Track in session for /review command
                 add_auto_categorized_transaction(
                     user_id=user_id,
                     transaction=tx,
                     category=result.category,
-                    description=result.description,
+                    description=final_desc,
                     transaction_type=tx_type,
                     method=result.method,
                     confidence=result.confidence
@@ -155,22 +147,28 @@ async def process_csv_file(
                     auto_categorized_count["ai"] += 1
             else:
                 # Low confidence or no match - needs manual review
-                # Store transaction WITH the AI result to avoid re-categorizing
+                # Preserve _ai_suggestion on the transaction for review UI
+                tx_with_suggestion = tx.copy()
+                tx_with_suggestion["_ai_suggestion"] = {
+                    "category": result.category,
+                    "description": final_desc,
+                    "confidence": result.confidence
+                }
                 manual_needed.append({
-                    "transaction": tx,
+                    "transaction": tx_with_suggestion,
                     "ai_category": result.category,
-                    "ai_description": result.description,
+                    "ai_description": final_desc,
                     "ai_confidence": result.confidence
                 })
     except Exception as e:
-        logger.error(f"Error during categorization loop: {e}", exc_info=True)
-        # Save whatever we categorized so far before crashing
-        # Extract raw transactions for session storage
+        logger.error(f"Error during categorization: {e}", exc_info=True)
         raw_manual = [item["transaction"] if isinstance(
             item, dict) and "transaction" in item else item for item in manual_needed]
         save_session(user_id, raw_manual, auto_income, auto_expenses)
-        await send_message(ctx_or_interaction, f"❌ Error during categorization: {e}\nPartial progress saved. Use `/resume` to continue.", ephemeral=True)
-        raise  # Re-raise to let caller handle
+        error_msg = (f"❌ Error during categorization: {e}\n"
+                     "Partial progress saved. Use `/resume` to continue.")
+        await send_message(ctx_or_interaction, error_msg, ephemeral=True)
+        raise
 
     # Upload auto-categorized transactions IMMEDIATELY (don't wait for manual
     # review)

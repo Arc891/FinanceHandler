@@ -26,7 +26,9 @@ class CategorizationResult:
     description: Optional[str]
     confidence: float  # 0.0 to 1.0
     method: str  # 'regex', 'ai_auto', 'ai_manual_needed', 'none'
-    reasoning: Optional[str] = None  # Only populated for AI categorizations
+    reasoning: Optional[str] = None
+    linked_transactions: Optional[list] = None  # indices of related transactions
+    description_suffix: Optional[str] = None  # e.g. "(voor Roompot)"
 
 
 class CategorizationEngine:
@@ -206,34 +208,164 @@ class CategorizationEngine:
         self, transactions: list[Dict[str, Any]]
     ) -> list[CategorizationResult]:
         """
-        Categorize a batch of transactions (async version).
+        Categorize a batch: regex first on all, then batch AI for unmatched.
 
-        Args:
-            transactions: List of transaction dicts
-
-        Returns:
-            List of CategorizationResult objects
+        Returns list of CategorizationResult, one per input transaction.
         """
-        results = []
-        for tx in transactions:
-            result = await self.categorize(tx)
-            results.append(result)
+        results: list[Optional[CategorizationResult]] = [None] * len(transactions)
 
-        # Log batch statistics
-        total = len(results)
-        regex_count = sum(1 for r in results if r.method == 'regex')
-        ai_auto_count = sum(1 for r in results if r.method == 'ai_auto')
-        ai_manual_count = sum(
-            1 for r in results if r.method == 'ai_manual_needed')
-        none_count = sum(1 for r in results if r.method == 'none')
+        # Pass 1: regex on all transactions
+        regex_matched = []  # (index, tx, result)
+        unmatched = []      # (index, tx)
+
+        for i, tx in enumerate(transactions):
+            cat, desc = self._apply_regex_rules(tx)
+            if cat:
+                result = CategorizationResult(
+                    category=cat, description=desc,
+                    confidence=1.0, method='regex')
+                results[i] = result
+                regex_matched.append((i, tx, result))
+            else:
+                unmatched.append((i, tx))
 
         logger.info(
-            f"Batch categorization complete: {total} transactions - "
-            f"Regex: {regex_count}, AI Auto: {ai_auto_count}, "
-            f"AI Manual: {ai_manual_count}, None: {none_count}"
-        )
+            f"Regex pass: {len(regex_matched)} matched, "
+            f"{len(unmatched)} need AI")
+
+        # Pass 2: batch AI for unmatched
+        if self.ai_enabled and self.ai_categorizer and unmatched:
+            try:
+                from constants import (
+                    ExpenseCategory, IncomeCategory,
+                    CATEGORIZATION_RULES_EXPENSE, CATEGORIZATION_RULES_INCOME
+                )
+                from automation.ai_categorizer import get_example_rules_for_ai
+
+                expense_categories = {
+                    cat.value: cat.value for cat in ExpenseCategory
+                    if cat != ExpenseCategory.DUMMY_CACHED}
+                income_categories = {
+                    cat.value: cat.value for cat in IncomeCategory
+                    if cat != IncomeCategory.DUMMY_CACHED}
+
+                # Combine rules for examples
+                all_rules = {**CATEGORIZATION_RULES_EXPENSE, **CATEGORIZATION_RULES_INCOME}
+                example_rules = get_example_rules_for_ai(all_rules)
+
+                # Build precategorized context
+                precategorized = []
+                for _, tx, result in regex_matched:
+                    precategorized.append({
+                        **tx, "category": result.category,
+                        "description": result.description
+                    })
+
+                unmatched_txs = [tx for _, tx in unmatched]
+
+                logger.info(
+                    f"Sending {len(unmatched_txs)} transactions to AI "
+                    f"(with {len(precategorized)} precategorized as context)")
+
+                ai_results = await self.ai_categorizer.categorize_batch(
+                    transactions_to_categorize=unmatched_txs,
+                    precategorized_transactions=precategorized,
+                    expense_categories=expense_categories,
+                    income_categories=income_categories,
+                    example_rules=example_rules
+                )
+
+                # Map AI results back and handle fallback for failures
+                for j, (orig_idx, orig_tx) in enumerate(unmatched):
+                    ai_result = ai_results[j] if j < len(ai_results) else None
+
+                    if ai_result is None:
+                        # Batch failed for this tx — fall back to individual
+                        logger.info(f"Falling back to per-tx AI for index {orig_idx}")
+                        fallback = await self._apply_ai_categorization(orig_tx)
+                        results[orig_idx] = fallback
+                    else:
+                        category, description, confidence, relationship = ai_result
+                        if confidence >= self.ai_confidence_threshold:
+                            method = 'ai_auto'
+                        else:
+                            method = 'ai_manual_needed'
+
+                        suffix = None
+                        linked = None
+                        if relationship:
+                            suffix = relationship.get('description_suffix')
+                            linked_ids = relationship.get('linked_to', [])
+                            if linked_ids:
+                                linked = linked_ids
+
+                        results[orig_idx] = CategorizationResult(
+                            category=category, description=description,
+                            confidence=confidence, method=method,
+                            description_suffix=suffix,
+                            linked_transactions=linked)
+
+                # Pass 3: apply relationship annotations to regex-matched
+                self._apply_relationship_annotations(
+                    results, unmatched, ai_results)
+
+            except Exception as e:
+                logger.error(f"Batch AI failed: {e}", exc_info=True)
+                # Fall back to per-transaction for all unmatched
+                for orig_idx, orig_tx in unmatched:
+                    if results[orig_idx] is None:
+                        fallback = await self._apply_ai_categorization(orig_tx)
+                        results[orig_idx] = fallback
+
+        # Fill remaining None results
+        for i, r in enumerate(results):
+            if r is None:
+                results[i] = CategorizationResult(
+                    category=None, description=None,
+                    confidence=0.0, method='none')
+
+        # Log statistics
+        total = len(results)
+        stats = {}
+        for r in results:
+            stats[r.method] = stats.get(r.method, 0) + 1
+        logger.info(f"Batch complete: {total} transactions - {stats}")
 
         return results
+
+    def _apply_relationship_annotations(
+        self, results, unmatched, ai_results
+    ):
+        """Apply relationship suffixes to regex-matched transactions if linked."""
+        # Build a map from T-id to unmatched index
+        tid_to_unmatched_idx = {}
+        for j, (orig_idx, _) in enumerate(unmatched):
+            tid_to_unmatched_idx[f"T{j+1}"] = orig_idx
+
+        for j, ai_result in enumerate(ai_results or []):
+            if ai_result is None:
+                continue
+            _, _, _, relationship = ai_result
+            if not relationship:
+                continue
+
+            linked_ids = relationship.get('linked_to', [])
+            suffix = relationship.get('description_suffix')
+
+            for linked_id in linked_ids:
+                if linked_id.startswith('C'):
+                    # Links to a regex-matched transaction
+                    # C-ids are 1-based into precategorized list
+                    try:
+                        c_idx = int(linked_id[1:]) - 1
+                        if 0 <= c_idx < len(results) and results[c_idx] is not None:
+                            # Don't change category, just add suffix
+                            if suffix and results[c_idx].method == 'regex':
+                                results[c_idx].description_suffix = suffix
+                                logger.info(
+                                    f"Added relationship suffix to regex tx C{c_idx+1}: {suffix}")
+                    except (ValueError, IndexError):
+                        pass
 
 
 def create_categorization_engine(

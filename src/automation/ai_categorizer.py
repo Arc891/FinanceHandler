@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 class ClaudeCategorizer:
     """Categorizes transactions using Claude API with confidence scoring."""
 
-    def __init__(self, api_key: Optional[str] = None, model: str = "haiku"):
+    def __init__(self, api_key: Optional[str] = None, model: str = "sonnet"):
         """
         Initialize the Claude categorizer.
 
@@ -292,6 +292,357 @@ Respond ONLY with the JSON object, nothing else. Remember: description must be i
         except json.JSONDecodeError as e:
             logger.error(f"Failed to parse JSON response: {e}")
             logger.debug(f"Response text: {response_text}")
+            return None
+
+    async def categorize_batch(
+        self,
+        transactions_to_categorize: list,
+        precategorized_transactions: list,
+        expense_categories: Dict[str, str],
+        income_categories: Dict[str, str],
+        example_rules: Dict[str, Tuple[str, str]]
+    ) -> list:
+        """
+        Categorize a batch of transactions in a single AI call.
+
+        Returns list of (category, description, confidence, relationship_info) tuples.
+        Returns None at positions where categorization failed.
+        """
+        from automation.data_anonymizer import anonymize_batch_for_ai
+
+        if not transactions_to_categorize:
+            return []
+
+        # Anonymize all transactions with consistent naming
+        all_transactions = precategorized_transactions + transactions_to_categorize
+        anonymized_all, name_mapping = anonymize_batch_for_ai(all_transactions)
+
+        anon_precategorized = anonymized_all[:len(precategorized_transactions)]
+        anon_to_categorize = anonymized_all[len(precategorized_transactions):]
+
+        # Build expected T-ids
+        expected_ids = [f"T{i+1}" for i in range(len(anon_to_categorize))]
+
+        # Chunk if needed
+        chunk_size = 40
+        if len(anon_to_categorize) <= chunk_size:
+            chunks = [(anon_to_categorize, transactions_to_categorize, expected_ids)]
+        else:
+            chunks = self._build_chunks(
+                anon_to_categorize, transactions_to_categorize, expected_ids, chunk_size)
+
+        all_results = [None] * len(transactions_to_categorize)
+        offset = 0
+
+        for chunk_anon, chunk_orig, chunk_ids in chunks:
+            prompt = self._build_batch_prompt(
+                chunk_anon, anon_precategorized, precategorized_transactions,
+                expense_categories, income_categories, example_rules, chunk_ids
+            )
+
+            try:
+                response_text = await self.provider.complete(
+                    prompt=prompt, max_tokens=8192, temperature=0.3)
+
+                parsed, missing_ids = self._parse_batch_response(
+                    response_text, chunk_ids,
+                    list(expense_categories.keys()) + list(income_categories.keys()))
+
+                # Repair if needed
+                if missing_ids and parsed is not None:
+                    logger.warning(f"Partial failure: {len(missing_ids)} missing IDs, attempting repair")
+                    repaired = await self._repair_batch_response(
+                        None, f"{len(missing_ids)} transactions missing",
+                        missing_ids, chunk_anon, chunk_ids,
+                        expense_categories, income_categories)
+                    if repaired:
+                        parsed.update(repaired)
+                        missing_ids = [tid for tid in chunk_ids if tid not in parsed]
+
+                elif parsed is None:
+                    logger.warning("Total parse failure, attempting repair")
+                    parsed_repair, still_missing = self._parse_batch_response(
+                        "", chunk_ids,
+                        list(expense_categories.keys()) + list(income_categories.keys()))
+                    repaired = await self._repair_batch_response(
+                        response_text[:2000], "JSON parse failed",
+                        chunk_ids, chunk_anon, chunk_ids,
+                        expense_categories, income_categories)
+                    if repaired:
+                        parsed = repaired
+                        missing_ids = [tid for tid in chunk_ids if tid not in parsed]
+                    else:
+                        missing_ids = chunk_ids
+
+                # Map results back
+                for i, tid in enumerate(chunk_ids):
+                    idx = offset + i
+                    if parsed and tid in parsed:
+                        entry = parsed[tid]
+                        confidence_map = {'high': 0.9, 'medium': 0.6, 'low': 0.3}
+                        conf = confidence_map.get(
+                            entry.get('confidence', 'low').lower(), 0.3)
+
+                        # De-anonymize description
+                        orig_tx = chunk_orig[i]
+                        counterparty_orig = (
+                            orig_tx.get('creditor', {}).get('name', '') or
+                            orig_tx.get('debtor', {}).get('name', '') or 'Unknown')
+                        ai_desc = entry.get('description', '')
+                        final_desc = self._build_local_description(
+                            counterparty_orig, ai_desc, entry.get('category', ''))
+
+                        # De-anonymize description_suffix
+                        suffix = entry.get('description_suffix')
+                        if suffix:
+                            for placeholder, real_name in name_mapping.items():
+                                suffix = suffix.replace(placeholder, real_name)
+
+                        relationship = None
+                        if entry.get('linked_to') or suffix:
+                            relationship = {
+                                'linked_to': entry.get('linked_to', []),
+                                'description_suffix': suffix
+                            }
+
+                        all_results[idx] = (
+                            entry.get('category'),
+                            final_desc,
+                            conf,
+                            relationship
+                        )
+
+            except Exception as e:
+                logger.error(f"Batch categorization chunk failed: {e}", exc_info=True)
+                # Leave None entries for this chunk — caller handles fallback
+
+            offset += len(chunk_ids)
+
+        return all_results
+
+    def _build_chunks(self, anon_txs, orig_txs, ids, chunk_size):
+        """Split transactions into chunks, avoiding splitting same counterparty."""
+        chunks = []
+        i = 0
+        while i < len(anon_txs):
+            end = min(i + chunk_size, len(anon_txs))
+            # Try not to split same counterparty
+            if end < len(anon_txs):
+                current_cp = anon_txs[end - 1].get('creditor', '')
+                while end < len(anon_txs) and anon_txs[end].get('creditor', '') == current_cp:
+                    end += 1
+                    if end - i > chunk_size + 10:
+                        break  # Safety limit
+            chunks.append((anon_txs[i:end], orig_txs[i:end], ids[i:end]))
+            i = end
+        return chunks
+
+    def _build_batch_prompt(
+        self, anon_to_categorize, anon_precategorized, orig_precategorized,
+        expense_categories, income_categories, example_rules, t_ids
+    ) -> str:
+        """Build the batch categorization prompt."""
+        # Format categories
+        expense_list = "\n".join(f"- {cat}" for cat in expense_categories.keys())
+        income_list = "\n".join(f"- {cat}" for cat in income_categories.keys())
+
+        # Format example rules (up to 30)
+        examples = []
+        for pattern, (desc_template, category) in list(example_rules.items())[:30]:
+            examples.append(f"- {pattern} → {category} (\"{desc_template}\")")
+        example_text = "\n".join(examples)
+
+        # Format precategorized context (deduplicate if >50)
+        precat_rows = []
+        seen = set()
+        for anon_tx, orig_tx in zip(anon_precategorized, orig_precategorized):
+            cat = orig_tx.get('category', '?')
+            cp = anon_tx.get('creditor', 'Unknown')
+            key = f"{cp}|{cat}"
+            if key in seen and len(precat_rows) >= 50:
+                continue
+            seen.add(key)
+            tx_type = "INCOME" if anon_tx.get('credit_debit_indicator') == 'CRDT' else "EXPENSE"
+            precat_rows.append(
+                f"| C{len(precat_rows)+1} | {anon_tx.get('booking_date', '?')} "
+                f"| {tx_type} | {anon_tx.get('transaction_amount', 0):.2f} "
+                f"| {cp} | {cat} |"
+            )
+            if len(precat_rows) >= 50:
+                break
+
+        precat_text = "\n".join(precat_rows) if precat_rows else "(none)"
+
+        # Format transactions to categorize
+        to_cat_rows = []
+        for tid, anon_tx in zip(t_ids, anon_to_categorize):
+            tx_type = "INCOME" if anon_tx.get('credit_debit_indicator') == 'CRDT' else "EXPENSE"
+            to_cat_rows.append(
+                f"| {tid} | {anon_tx.get('booking_date', '?')} "
+                f"| {tx_type} | {anon_tx.get('transaction_amount', 0):.2f} "
+                f"| {anon_tx.get('creditor', 'Unknown')} "
+                f"| {anon_tx.get('remittance_information', '')[:80]} |"
+            )
+        to_cat_text = "\n".join(to_cat_rows)
+
+        return f"""You are a transaction categorization assistant for Dutch household budgets.
+
+## Available Categories
+### Expense:
+{expense_list}
+
+### Income:
+{income_list}
+
+## Example Rules (reference - shows how similar transactions are categorized):
+{example_text}
+
+## Pre-Categorized Transactions (READ-ONLY context - do NOT change these):
+| # | Date | Type | Amount EUR | Counterparty | Category |
+|---|------|------|-----------|--------------|----------|
+{precat_text}
+
+## Transactions to Categorize:
+| # | Date | Type | Amount EUR | Counterparty | Description |
+|---|------|------|-----------|--------------|-------------|
+{to_cat_text}
+
+## Instructions:
+1. Categorize each T-transaction. Use EXACT category names from the lists above.
+2. Description: concise, IN DUTCH, max 50 characters.
+3. Confidence: high / medium / low.
+4. **Relationship Detection**:
+   a. If income transfers (from savings/personal accounts) sum to match an expense
+      amount (within 0.02 EUR), they are likely related. Link them:
+      - Income descriptions: append "(voor [expense name])"
+      - Expense description: append "(deels uit spaarpot)"
+      - Income from savings accounts → use "Spaarrekening" category
+   b. Same counterparty across transactions → use consistent categories.
+5. Pre-categorized (C-rows) are final. Use them for context only.
+
+## Response (JSON only, no markdown code blocks):
+{{"transactions": [
+  {{"id": "T1", "category": "...", "description": "...", "confidence": "high|medium|low",
+   "reasoning": "...", "linked_to": ["T2","T3"], "description_suffix": "(deels uit spaarpot)"}},
+  ...
+]}}
+
+Respond ONLY with the JSON object. Description must be in DUTCH."""
+
+    def _parse_batch_response(self, response_text, expected_ids, valid_categories):
+        """
+        Parse batch AI response.
+
+        Returns (parsed_dict, missing_ids) where parsed_dict maps T-id to entry dict.
+        Returns (None, all_ids) on total parse failure.
+        """
+        try:
+            # Extract JSON (handle markdown code blocks)
+            json_text = response_text.strip()
+            if "```json" in json_text:
+                start = json_text.find("```json") + 7
+                end = json_text.find("```", start)
+                json_text = json_text[start:end].strip()
+            elif "```" in json_text:
+                start = json_text.find("```") + 3
+                end = json_text.find("```", start)
+                json_text = json_text[start:end].strip()
+
+            result = json.loads(json_text)
+
+            if 'transactions' not in result:
+                logger.warning("Batch response missing 'transactions' key")
+                return None, list(expected_ids)
+
+            parsed = {}
+            for entry in result['transactions']:
+                tid = entry.get('id')
+                if not tid:
+                    continue
+                if not all(k in entry for k in ('category', 'description', 'confidence')):
+                    logger.warning(f"Entry {tid} missing required fields")
+                    continue
+                # Validate category
+                if entry['category'] not in valid_categories:
+                    logger.warning(
+                        f"Entry {tid} has invalid category '{entry['category']}', keeping anyway")
+                parsed[tid] = entry
+
+            missing = [tid for tid in expected_ids if tid not in parsed]
+            if missing:
+                logger.warning(f"Batch response missing {len(missing)} IDs: {missing}")
+
+            return parsed, missing
+
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse batch JSON: {e}")
+            return None, list(expected_ids)
+
+    async def _repair_batch_response(
+        self, malformed_response, error_msg, missing_ids,
+        anon_transactions, all_ids, expense_categories, income_categories
+    ):
+        """
+        Attempt to repair a failed batch response.
+
+        For partial failure: requests only missing transactions.
+        For total failure: sends truncated malformed response with category lists.
+
+        Returns dict mapping T-id to entry, or None on failure.
+        """
+        expense_list = ", ".join(expense_categories.keys())
+        income_list = ", ".join(income_categories.keys())
+
+        if malformed_response is None:
+            # Partial failure - only request missing
+            missing_data = []
+            for tid in missing_ids:
+                idx = all_ids.index(tid)
+                tx = anon_transactions[idx]
+                tx_type = "INCOME" if tx.get('credit_debit_indicator') == 'CRDT' else "EXPENSE"
+                missing_data.append(
+                    f"| {tid} | {tx.get('booking_date', '?')} | {tx_type} "
+                    f"| {tx.get('transaction_amount', 0):.2f} | {tx.get('creditor', '?')} "
+                    f"| {tx.get('remittance_information', '')[:60]} |")
+
+            prompt = f"""You previously categorized transactions but missed some. Categorize ONLY these:
+
+Valid expense categories: {expense_list}
+Valid income categories: {income_list}
+
+| # | Date | Type | Amount EUR | Counterparty | Description |
+|---|------|------|-----------|--------------|-------------|
+{chr(10).join(missing_data)}
+
+Response (JSON only, no markdown):
+{{"transactions": [{{"id": "T5", "category": "...", "description": "...", "confidence": "high|medium|low"}}]}}"""
+
+        else:
+            # Total failure
+            prompt = f"""Your previous response was malformed JSON:
+{malformed_response}
+
+Error: {error_msg}
+
+Valid expense categories: {expense_list}
+Valid income categories: {income_list}
+
+Return ONLY valid JSON:
+{{"transactions": [{{"id": "T1", "category": "...", "description": "...", "confidence": "high|medium|low"}}]}}"""
+
+        try:
+            response = await self.provider.complete(
+                prompt=prompt, max_tokens=10240, temperature=0.2)
+
+            valid_cats = list(expense_categories.keys()) + list(income_categories.keys())
+            parsed, still_missing = self._parse_batch_response(
+                response, missing_ids, valid_cats)
+            if still_missing:
+                logger.warning(f"Repair still missing {len(still_missing)} IDs")
+            return parsed
+
+        except Exception as e:
+            logger.error(f"Repair attempt failed: {e}")
             return None
 
 

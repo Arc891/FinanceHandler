@@ -102,13 +102,18 @@ class TransactionAnonymizer:
 
         # Extract transaction type (safe - just DBIT/CRDT)
         tx_type = transaction.get('credit_debit_indicator', 'UNKNOWN')
-        is_expense = tx_type == 'DBIT'
 
-        # Extract and anonymize counterparty name
-        if is_expense:
-            counterparty_raw = transaction.get('creditor', {}).get('name', '')
-        else:
-            counterparty_raw = transaction.get('debtor', {}).get('name', '')
+        # Extract counterparty name (check both fields, use whichever is non-empty)
+        counterparty_raw = (
+            transaction.get('creditor', {}).get('name', '') or
+            transaction.get('debtor', {}).get('name', '')
+        )
+        if not counterparty_raw.strip():
+            remittance = transaction.get('remittance_information', [])
+            if remittance and isinstance(remittance, list):
+                counterparty_raw = remittance[0][:60]
+            elif remittance:
+                counterparty_raw = str(remittance)[:60]
 
         counterparty_clean = self._anonymize_counterparty(counterparty_raw)
 
@@ -143,6 +148,81 @@ class TransactionAnonymizer:
             )
 
         return anonymized
+
+    def anonymize_batch(
+        self, transactions: list
+    ) -> tuple:
+        """
+        Anonymize a batch of transactions with consistent placeholder mapping.
+
+        The same personal name gets the same placeholder across all transactions,
+        enabling the AI to detect cross-transaction patterns (e.g., "Person_A sent
+        3 transfers totaling X").
+
+        Returns:
+            Tuple of (anonymized_transactions, name_mapping)
+            name_mapping: dict mapping placeholder -> original name
+        """
+        person_counter = 0
+        name_to_placeholder = {}
+        placeholder_to_name = {}
+        results = []
+
+        for transaction in transactions:
+            amount_info = transaction.get('transaction_amount', {})
+            amount = float(amount_info.get('amount', 0))
+            tx_type = transaction.get('credit_debit_indicator', 'UNKNOWN')
+
+            # Extract counterparty (both fields, fallback to remittance)
+            counterparty_raw = (
+                transaction.get('creditor', {}).get('name', '') or
+                transaction.get('debtor', {}).get('name', '')
+            )
+            if not counterparty_raw.strip():
+                remittance = transaction.get('remittance_information', [])
+                if remittance and isinstance(remittance, list):
+                    counterparty_raw = remittance[0][:60]
+                elif remittance:
+                    counterparty_raw = str(remittance)[:60]
+
+            # Anonymize with consistent naming
+            counterparty_clean = self._anonymize_counterparty(counterparty_raw)
+            if counterparty_clean == "Private Person":
+                # Assign consistent placeholder for this person
+                name_key = counterparty_raw.strip().lower()
+                if name_key in name_to_placeholder:
+                    counterparty_clean = name_to_placeholder[name_key]
+                else:
+                    person_counter += 1
+                    label = chr(ord('A') + (person_counter - 1) % 26)
+                    if person_counter > 26:
+                        label = f"{label}{person_counter // 26}"
+                    placeholder = f"Person_{label}"
+                    name_to_placeholder[name_key] = placeholder
+                    placeholder_to_name[placeholder] = counterparty_raw.strip()
+                    counterparty_clean = placeholder
+
+            # Anonymize remittance
+            remittance_raw = transaction.get('remittance_information', [])
+            if isinstance(remittance_raw, list):
+                remittance_text = ' '.join(remittance_raw)
+            else:
+                remittance_text = str(remittance_raw)
+            remittance_clean = self._anonymize_text(remittance_text)
+
+            results.append({
+                'transaction_amount': amount,
+                'credit_debit_indicator': tx_type,
+                'creditor': counterparty_clean,
+                'remittance_information': remittance_clean,
+                'booking_date': transaction.get('booking_date', '')
+            })
+
+        logger.info(
+            f"Batch anonymized {len(transactions)} transactions, "
+            f"{len(placeholder_to_name)} unique persons masked"
+        )
+        return results, placeholder_to_name
 
     def _anonymize_counterparty(self, name: str) -> str:
         """
@@ -294,3 +374,14 @@ def get_anonymized_summary(transaction: Dict[str, Any]) -> str:
         Human-readable summary
     """
     return _anonymizer.get_safe_summary(transaction)
+
+
+def anonymize_batch_for_ai(transactions: list) -> tuple:
+    """
+    Anonymize a batch of transactions with consistent person naming.
+
+    Returns:
+        Tuple of (anonymized_transactions, name_mapping)
+        name_mapping: dict mapping placeholder -> original name
+    """
+    return _anonymizer.anonymize_batch(transactions)
