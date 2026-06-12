@@ -176,14 +176,18 @@ def get_sheet_positions(user_id: int) -> Dict[str, Any]:
 
 
 def save_sheet_positions(user_id: int, expense_row: int,
-                         income_row: int) -> None:
-    """Save sheet positions for a user"""
+                         income_row: int,
+                         sheet_name: str = None) -> None:
+    """Save sheet positions for a user, optionally recording which sheet they belong to"""
     session_data = _load_full_session(user_id)
-    session_data["sheet_positions"] = {
+    positions = {
         "expense_row": expense_row,
         "income_row": income_row,
         "last_updated": datetime.now().isoformat()
     }
+    if sheet_name is not None:
+        positions["sheet_name"] = sheet_name
+    session_data["sheet_positions"] = positions
     _save_full_session(user_id, session_data)
 
 

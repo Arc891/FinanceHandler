@@ -4,17 +4,89 @@ Handles immediate transaction uploads with proper rate limiting.
 """
 
 import logging
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from dataclasses import dataclass
 from datetime import datetime
 import threading
 import time
 from queue import Queue, Empty
 import os
+import json
 
 from finance_core.google_sheets import GoogleSheetsExporter
 
 logger = logging.getLogger(__name__)
+
+
+def _get_failed_uploads_path() -> str:
+    """Get the path to the failed uploads recovery file"""
+    base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    return os.path.join(base_dir, "data", "failed_uploads.json")
+
+
+def _load_failed_uploads() -> Dict[str, List[Dict[str, Any]]]:
+    """Load failed uploads from recovery file"""
+    path = _get_failed_uploads_path()
+    if not os.path.exists(path):
+        return {"failed": []}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, IOError) as e:
+        logger.warning(f"⚠️ Could not load failed uploads file: {e}")
+        return {"failed": []}
+
+
+def _save_failed_uploads(data: Dict[str, List[Dict[str, Any]]]) -> None:
+    """Save failed uploads to recovery file"""
+    path = _get_failed_uploads_path()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+
+
+def save_failed_upload(transaction: Dict[str, Any], transaction_type: str,
+                       user_id: int, error: str) -> None:
+    """Save a failed upload to the recovery file for later retry"""
+    data = _load_failed_uploads()
+
+    failed_item = {
+        "transaction": transaction,
+        "transaction_type": transaction_type,
+        "user_id": user_id,
+        "error": error,
+        "failed_at": datetime.now().isoformat()
+    }
+
+    data["failed"].append(failed_item)
+    _save_failed_uploads(data)
+    logger.info(f"💾 Saved failed upload to recovery file for user {user_id}")
+
+
+def get_failed_uploads(user_id: Optional[int] = None) -> List[Dict[str, Any]]:
+    """Get failed uploads, optionally filtered by user_id"""
+    data = _load_failed_uploads()
+    failed = data.get("failed", [])
+
+    if user_id is not None:
+        return [f for f in failed if f.get("user_id") == user_id]
+    return failed
+
+
+def clear_failed_uploads(user_id: Optional[int] = None) -> int:
+    """Clear failed uploads, optionally filtered by user_id. Returns count cleared."""
+    data = _load_failed_uploads()
+    original_count = len(data.get("failed", []))
+
+    if user_id is not None:
+        data["failed"] = [f for f in data.get("failed", []) if f.get("user_id") != user_id]
+    else:
+        data["failed"] = []
+
+    _save_failed_uploads(data)
+    cleared = original_count - len(data["failed"])
+    logger.info(f"🧹 Cleared {cleared} failed uploads from recovery file")
+    return cleared
 
 
 @dataclass
@@ -47,6 +119,9 @@ class GoogleSheetsUploadQueue:
     We'll be conservative and use 1 request per 2 seconds to stay well within limits.
     """
 
+    # Positions older than this are considered stale and will be re-detected
+    POSITION_STALENESS_SECONDS = 30 * 60  # 30 minutes
+
     def __init__(self, credentials_path: str):
         self.credentials_path = credentials_path
         self.upload_queue = Queue()
@@ -64,18 +139,34 @@ class GoogleSheetsUploadQueue:
             self.default_expense_start_row = 2
             self.default_income_start_row = 2
 
+        # Lock protecting shared mutable state (row positions, user_id, staleness timestamp)
+        self._position_lock = threading.Lock()
+
         # Track row positions - will be loaded per user when needed
         self.current_expense_row = self.default_expense_start_row  # Use configurable default
         self.current_income_row = self.default_income_start_row
         self.current_user_id = None  # Track which user's positions we have loaded
+        self._last_position_load: Optional[datetime] = None  # When positions were last loaded
 
         # Rate limiting
         self.last_request_time = 0
         self.min_request_interval = 2.0  # 2 seconds between requests
 
+    def _positions_may_be_stale(self) -> bool:
+        """Check if loaded positions are potentially stale based on time elapsed"""
+        if self._last_position_load is None:
+            return True
+        elapsed = (datetime.now() - self._last_position_load).total_seconds()
+        return elapsed > self.POSITION_STALENESS_SECONDS
+
     def _load_row_positions(self, user_id: int):
         """Load the current row positions for a specific user"""
         from finance_core.session_management import get_sheet_positions
+
+        try:
+            from config.config_settings import GSHEET_NAME
+        except ImportError:
+            GSHEET_NAME = None
 
         try:
             positions = get_sheet_positions(user_id)
@@ -94,8 +185,14 @@ class GoogleSheetsUploadQueue:
             logger.info(
                 f"📍 Loaded row positions for user {user_id}: expenses={self.current_expense_row}, income={self.current_income_row}")
 
-            # If no positions saved yet, detect them
-            if positions.get('last_updated') is None:
+            # Check if positions were saved for a different sheet (e.g. after config change + restart)
+            saved_sheet = positions.get('sheet_name')
+            if saved_sheet and GSHEET_NAME and saved_sheet != GSHEET_NAME:
+                logger.warning(
+                    f"⚠️ Saved positions are for sheet '{saved_sheet}' but current sheet is '{GSHEET_NAME}' - forcing fresh detection")
+                self._detect_current_positions(user_id)
+            elif positions.get('last_updated') is None:
+                # If no positions saved yet, detect them
                 self._detect_current_positions(user_id)
             else:
                 # If cached positions are very high (>10), verify the sheet actually has that much data
@@ -140,6 +237,8 @@ class GoogleSheetsUploadQueue:
                             f"⚠️ Could not verify cached positions: {e}, forcing fresh detection")
                         self._detect_current_positions(user_id)
 
+            self._last_position_load = datetime.now()
+
         except Exception as e:
             logger.error(f"❌ Error loading row positions: {e}")
             self._detect_current_positions(user_id)
@@ -149,10 +248,16 @@ class GoogleSheetsUploadQueue:
         from finance_core.session_management import save_sheet_positions
 
         try:
+            from config.config_settings import GSHEET_NAME
+        except ImportError:
+            GSHEET_NAME = None
+
+        try:
             save_sheet_positions(
                 user_id,
                 self.current_expense_row,
-                self.current_income_row)
+                self.current_income_row,
+                sheet_name=GSHEET_NAME)
             logger.debug(
                 f"💾 Saved row positions for user {user_id}: expenses={self.current_expense_row}, income={self.current_income_row}")
         except Exception as e:
@@ -170,12 +275,12 @@ class GoogleSheetsUploadQueue:
                 f"🔍 Detecting row positions in Google Sheet for user {user_id}...")
 
             # Get expense columns (B:E)
-            expense_values = sheet.get('B1:E200')
+            expense_values = sheet.get('B1:E1000')
             self.current_expense_row = self._find_last_data_row(
                 expense_values, "expense")
 
             # Get income columns (G:J)
-            income_values = sheet.get('G1:J200')
+            income_values = sheet.get('G1:J1000')
             self.current_income_row = self._find_last_data_row(
                 income_values, "income")
 
@@ -263,20 +368,21 @@ class GoogleSheetsUploadQueue:
         # Skip this for replacements since they use existing rows
         if 'cache_id' in transaction and not transaction.get(
                 '_is_replacement'):
-            # Ensure we have positions loaded for this user
-            if self.current_user_id != user_id:
-                self._load_row_positions(user_id)
+            with self._position_lock:
+                # Ensure we have positions loaded for this user
+                if self.current_user_id != user_id:
+                    self._load_row_positions(user_id)
 
-            # Reserve the row position immediately
-            if transaction_type == "expense":
-                reserved_row = self.current_expense_row
-                self.current_expense_row += 1
-            else:  # income
-                reserved_row = self.current_income_row
-                self.current_income_row += 1
+                # Reserve the row position immediately
+                if transaction_type == "expense":
+                    reserved_row = self.current_expense_row
+                    self.current_expense_row += 1
+                else:  # income
+                    reserved_row = self.current_income_row
+                    self.current_income_row += 1
 
-            # Save the updated positions to prevent conflicts
-            self._save_row_positions(user_id)
+                # Save the updated positions to prevent conflicts
+                self._save_row_positions(user_id)
 
             # Store the reserved row in the cached transaction
             from finance_core.session_management import update_cached_transaction_row
@@ -334,8 +440,8 @@ class GoogleSheetsUploadQueue:
                 # Apply rate limiting
                 self._rate_limit()
 
-                # Upload the transaction
-                self._upload_single_transaction(upload)
+                # Upload with retry on transient errors (429 rate limits)
+                self._upload_with_retry(upload)
 
                 # Mark task as done
                 self.upload_queue.task_done()
@@ -350,12 +456,40 @@ class GoogleSheetsUploadQueue:
 
         logger.info("👷 Upload worker stopped")
 
+    def _upload_with_retry(self, upload: TransactionUpload, max_retries: int = 3):
+        """Upload a transaction with exponential backoff retry on rate limit errors"""
+        for attempt in range(max_retries + 1):
+            try:
+                self._upload_single_transaction(upload)
+                return  # Success
+            except Exception as e:
+                error_str = str(e)
+                is_rate_limit = "429" in error_str or "Quota exceeded" in error_str
+
+                if is_rate_limit and attempt < max_retries:
+                    backoff = 2 ** attempt * 30  # 30s, 60s, 120s
+                    logger.warning(
+                        f"⏳ Rate limited (attempt {attempt + 1}/{max_retries + 1}), "
+                        f"backing off {backoff}s before retry...")
+                    time.sleep(backoff)
+                    # Clear cached sheet to force fresh connection after backoff
+                    if self.exporter:
+                        self.exporter.sheet = None
+                    continue
+                else:
+                    raise  # Non-retryable error or max retries exceeded
+
     def _upload_single_transaction(self, upload: TransactionUpload):
         """Upload a single transaction to Google Sheets"""
         try:
-            # Ensure we have positions loaded for this user
-            if self.current_user_id != upload.user_id:
-                self._load_row_positions(upload.user_id)
+            # Ensure we have fresh positions loaded for this user
+            with self._position_lock:
+                needs_refresh = self.current_user_id != upload.user_id
+                if not needs_refresh and self._positions_may_be_stale():
+                    logger.info("⏰ Row positions may be stale (>30min old), refreshing...")
+                    needs_refresh = True
+                if needs_refresh:
+                    self._load_row_positions(upload.user_id)
 
             if not self.exporter:
                 self.exporter = GoogleSheetsExporter(self.credentials_path)
@@ -420,9 +554,10 @@ class GoogleSheetsUploadQueue:
                     f"📍 Using current row {target_row} for {upload.transaction_type} transaction")
 
             # CRITICAL: Check if the target row exceeds sheet bounds and expand
-            # if necessary
+            # if necessary. Use cached sheet metadata to avoid extra API calls;
+            # if the cache is wrong, ensure_sheet_capacity will refresh anyway.
             try:
-                if not self.exporter.check_row_bounds(target_row):
+                if not self.exporter.check_row_bounds(target_row, use_cache=True):
                     logger.warning(
                         f"⚠️ Target row {target_row} exceeds sheet bounds, expanding sheet...")
                     self.exporter.ensure_sheet_capacity(
@@ -462,14 +597,14 @@ class GoogleSheetsUploadQueue:
 
                             # Re-detect the actual next empty row from scratch
                             if upload.transaction_type == "expense":
-                                expense_values = sheet.get('B1:E200')
+                                expense_values = sheet.get('B1:E1000')
                                 corrected_row = self._find_last_data_row(
                                     expense_values, "expense")
                                 self.current_expense_row = corrected_row
                                 target_row = corrected_row
                                 target_range = f"B{target_row}:E{target_row}"
                             else:
-                                income_values = sheet.get('G1:J200')
+                                income_values = sheet.get('G1:J1000')
                                 corrected_row = self._find_last_data_row(
                                     income_values, "income")
                                 self.current_income_row = corrected_row
@@ -539,61 +674,93 @@ class GoogleSheetsUploadQueue:
                 f"✅ Uploaded {upload.transaction_type} to {target_range}: {formatted_data[2][:50]}...")
 
         except Exception as e:
+            error_str = str(e)
+            # Reset state on grid limits errors so subsequent transactions can self-correct
+            if "exceeds grid limits" in error_str.lower():
+                logger.warning("⚠️ Grid limits error - resetting sheet cache and forcing position reload")
+                with self._position_lock:
+                    if self.exporter:
+                        self.exporter.sheet = None
+                    self.current_user_id = None  # Force position reload on next attempt
+                    self._last_position_load = None
+
             logger.error(f"❌ Failed to upload transaction: {e}")
-            # Could implement retry logic here if needed
+            # Save to recovery file for later retry
+            save_failed_upload(
+                transaction=upload.transaction,
+                transaction_type=upload.transaction_type,
+                user_id=upload.user_id,
+                error=error_str
+            )
             raise
 
     def retry_failed_transactions(
             self, user_id: int, transaction_type: Optional[str] = None):
         """
-        Retry failed transactions from the user's session data.
+        Retry failed transactions from BOTH the recovery file AND session data.
 
         Args:
             user_id: The user ID to retry transactions for
             transaction_type: Optional filter for "expense" or "income", or None for both
         """
         try:
-            # Load session data to get categorized transactions that may have
-            # failed
+            retry_count = 0
+
+            # First, check the failed uploads recovery file
+            failed_uploads = get_failed_uploads(user_id)
+            if failed_uploads:
+                logger.info(
+                    f"🔄 Found {len(failed_uploads)} failed uploads in recovery file for user {user_id}")
+                for item in failed_uploads:
+                    tx_type = item.get("transaction_type")
+                    if transaction_type is not None and tx_type != transaction_type:
+                        continue
+
+                    transaction = item.get("transaction", {})
+                    if not transaction.get("category"):
+                        logger.warning(
+                            f"⚠️ Skipping transaction without category: {transaction.get('booking_date', 'Unknown')}")
+                        continue
+
+                    self.queue_transaction(transaction, tx_type, user_id)
+                    retry_count += 1
+                    logger.debug(
+                        f"🔄 Queued from recovery: {transaction.get('description', 'No description')[:50]}")
+
+            # Also check session data (legacy support)
             from finance_core.session_management import load_session
             remaining, income_transactions, expense_transactions = load_session(
                 user_id)
 
-            retry_count = 0
-
-            # Retry expense transactions
+            # Retry expense transactions from session
             if transaction_type in (None, "expense") and expense_transactions:
                 logger.info(
-                    f"🔄 Retrying {len(expense_transactions)} failed expense transactions for user {user_id}")
+                    f"🔄 Retrying {len(expense_transactions)} expense transactions from session for user {user_id}")
                 for transaction in expense_transactions:
-                    # Check if transaction already has necessary fields
                     if not transaction.get("category"):
                         logger.warning(
-                            f"⚠️ Skipping expense transaction without category: {transaction.get('booking_date', 'Unknown date')}")
+                            f"⚠️ Skipping expense without category: {transaction.get('booking_date', 'Unknown')}")
                         continue
 
-                    # Queue for background upload
                     self.queue_transaction(transaction, "expense", user_id)
                     retry_count += 1
                     logger.debug(
-                        f"🔄 Queued failed expense transaction: {transaction.get('description', 'No description')[:50]}")
+                        f"🔄 Queued from session: {transaction.get('description', 'No description')[:50]}")
 
-            # Retry income transactions
+            # Retry income transactions from session
             if transaction_type in (None, "income") and income_transactions:
                 logger.info(
-                    f"🔄 Retrying {len(income_transactions)} failed income transactions for user {user_id}")
+                    f"🔄 Retrying {len(income_transactions)} income transactions from session for user {user_id}")
                 for transaction in income_transactions:
-                    # Check if transaction already has necessary fields
                     if not transaction.get("category"):
                         logger.warning(
-                            f"⚠️ Skipping income transaction without category: {transaction.get('booking_date', 'Unknown date')}")
+                            f"⚠️ Skipping income without category: {transaction.get('booking_date', 'Unknown')}")
                         continue
 
-                    # Queue for background upload
                     self.queue_transaction(transaction, "income", user_id)
                     retry_count += 1
                     logger.debug(
-                        f"🔄 Queued failed income transaction: {transaction.get('description', 'No description')[:50]}")
+                        f"🔄 Queued from session: {transaction.get('description', 'No description')[:50]}")
 
             if retry_count > 0:
                 logger.info(
@@ -611,11 +778,14 @@ class GoogleSheetsUploadQueue:
 
     def clear_failed_transactions_after_retry(self, user_id: int):
         """
-        Clear the categorized transactions from session after successful retry.
+        Clear the categorized transactions from session AND recovery file after successful retry.
         This should be called after confirming the retry uploads were successful.
         """
         try:
             from finance_core.session_management import save_session, load_session
+
+            # Clear from recovery file first
+            recovery_cleared = clear_failed_uploads(user_id)
 
             # Load current session
             remaining, income_transactions, expense_transactions = load_session(
@@ -625,10 +795,11 @@ class GoogleSheetsUploadQueue:
             # uncategorized ones
             save_session(user_id, remaining, [], [])
 
-            cleared_count = len(income_transactions) + \
-                len(expense_transactions)
+            session_cleared = len(income_transactions) + len(expense_transactions)
+            total_cleared = recovery_cleared + session_cleared
             logger.info(
-                f"🧹 Cleared {cleared_count} categorized transactions from session after retry (user {user_id})")
+                f"🧹 Cleared {total_cleared} transactions after retry (user {user_id}): "
+                f"{recovery_cleared} from recovery file, {session_cleared} from session")
 
         except Exception as e:
             logger.error(

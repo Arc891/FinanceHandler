@@ -107,18 +107,25 @@ class GoogleSheetsExporter:
             raise Exception(
                 f"Could not expand sheet to accommodate row {required_row}: {e}")
 
-    def check_row_bounds(self, target_row: int) -> bool:
+    def refresh_worksheet(self):
+        """Force re-fetch of the worksheet to get fresh metadata (row count, etc.)"""
+        self.sheet = None
+        return self._get_worksheet()
+
+    def check_row_bounds(self, target_row: int, use_cache: bool = False) -> bool:
         """
         Check if a target row is within the current sheet bounds.
 
         Args:
             target_row: The row number to check
+            use_cache: If True, use cached worksheet (avoids API call).
+                       If False (default), forces a metadata refresh.
 
         Returns:
             True if the row is within bounds, False otherwise
         """
         try:
-            sheet = self._get_worksheet()
+            sheet = self._get_worksheet() if use_cache else self.refresh_worksheet()
             return target_row <= sheet.row_count
         except Exception as e:
             logger.error(f"❌ Failed to check sheet bounds: {e}")
@@ -326,7 +333,8 @@ class GoogleSheetsExporter:
                             f"📊 Sorting {len(sorted_data)} expenses in range {sort_range} chronologically...")
 
                         # Write sorted data back to sheet
-                        sheet.update(sorted_data, sort_range)
+                        # Use USER_ENTERED to preserve number/currency formatting
+                        sheet.update(sorted_data, sort_range, value_input_option='USER_ENTERED')
                         expense_sorted = len(sorted_data)
                         logger.info(
                             f"✅ Sorted {expense_sorted} expense rows by date")
@@ -349,7 +357,8 @@ class GoogleSheetsExporter:
                             f"📊 Sorting {len(sorted_data)} income in range {sort_range} chronologically...")
 
                         # Write sorted data back to sheet
-                        sheet.update(sorted_data, sort_range)
+                        # Use USER_ENTERED to preserve number/currency formatting
+                        sheet.update(sorted_data, sort_range, value_input_option='USER_ENTERED')
                         income_sorted = len(sorted_data)
                         logger.info(
                             f"✅ Sorted {income_sorted} income rows by date")
