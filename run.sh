@@ -117,6 +117,7 @@ fi
     --image "finance-automation-bot" \
     --port "8383" \
     --registry "registry.arc8.dev" \
+    --push-registry "localhost:5000" \
     --version-file "package.json" \
     --docker-run-args "${DOCKER_RUN_ARGS[@]}"
 
