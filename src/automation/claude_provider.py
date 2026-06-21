@@ -103,6 +103,46 @@ class ClaudeProvider:
                 "No Claude access available. Install Claude Code or provide API key."
             )
 
+    @staticmethod
+    def _parse_cli_response(stdout_str: str) -> tuple:
+        """
+        Extract (result_text, cost) from a `claude -p --output-format json` reply.
+
+        Handles both CLI output shapes:
+        - Newer CLI: a JSON array of message objects; the final assistant
+          result is the element with type == "result".
+        - Older CLI: a single JSON object with is_error/result/total_cost_usd.
+
+        Raises:
+            RuntimeError: if the CLI reported an error or no result is present.
+        """
+        parsed = json.loads(stdout_str)
+
+        if isinstance(parsed, list):
+            # Find the result object; fall back to the last dict in the stream.
+            result_obj = next(
+                (m for m in parsed
+                 if isinstance(m, dict) and m.get("type") == "result"),
+                None,
+            )
+            if result_obj is None:
+                result_obj = next(
+                    (m for m in reversed(parsed) if isinstance(m, dict)), None)
+            if result_obj is None:
+                raise RuntimeError(
+                    "Claude Code CLI returned no result object in array output")
+        elif isinstance(parsed, dict):
+            result_obj = parsed
+        else:
+            raise RuntimeError(
+                f"Unexpected Claude Code CLI output type: {type(parsed).__name__}")
+
+        if result_obj.get("is_error"):
+            raise RuntimeError(
+                f"Claude Code error: {result_obj.get('result')}")
+
+        return result_obj.get("result", ""), result_obj.get("total_cost_usd", 0)
+
     async def _complete_cli(self, prompt: str, **kwargs) -> str:
         """
         Complete using Claude Code CLI (async version).
@@ -161,15 +201,8 @@ class ClaudeProvider:
                 logger.error(f"Claude Code CLI error: {error_msg}")
                 raise RuntimeError(f"Claude Code CLI failed: {error_msg}")
 
-            # Parse JSON response
-            response = json.loads(stdout_str)
-
-            if response.get("is_error"):
-                raise RuntimeError(
-                    f"Claude Code error: {response.get('result')}")
-
-            response_text = response.get("result", "")
-            cost = response.get("total_cost_usd", 0)
+            # Parse JSON response (format varies by CLI version)
+            response_text, cost = self._parse_cli_response(stdout_str)
 
             logger.info(
                 f"Claude Code CLI response received (cost: ${cost:.4f})")
@@ -177,7 +210,6 @@ class ClaudeProvider:
 
             if not response_text:
                 logger.warning("Empty response from Claude Code CLI")
-                logger.debug(f"Full response keys: {list(response.keys())}")
 
             return response_text
 
