@@ -126,6 +126,19 @@ class CategorizationEngine:
             logger.error(f"Error applying regex rules: {e}")
             return None, None
 
+    def _decide_method(self, confidence: float, description: str) -> str:
+        """
+        Decide whether an AI result can auto-upload or needs manual review.
+
+        Requires both sufficient confidence AND a non-blank description: a
+        transaction with no usable description should be reviewed (and given
+        one) rather than auto-uploaded with an empty/junk label.
+        """
+        if confidence >= self.ai_confidence_threshold and (
+                description or "").strip():
+            return 'ai_auto'
+        return 'ai_manual_needed'
+
     async def _apply_ai_categorization(
         self, transaction: Dict[str, Any]
     ) -> CategorizationResult:
@@ -175,14 +188,13 @@ class CategorizationEngine:
                 )
 
             # Determine if AI is confident enough for auto-approval
-            if confidence >= self.ai_confidence_threshold:
-                method = 'ai_auto'
+            method = self._decide_method(confidence, description)
+            if method == 'ai_auto':
                 logger.info(
                     f"AI auto-approved: {category} - {description} "
                     f"(confidence: {confidence:.2f})"
                 )
             else:
-                method = 'ai_manual_needed'
                 logger.info(
                     f"AI needs manual review: {category} - {description} "
                     f"(confidence: {confidence:.2f})"
@@ -286,10 +298,7 @@ class CategorizationEngine:
                         results[orig_idx] = fallback
                     else:
                         category, description, confidence, relationship = ai_result
-                        if confidence >= self.ai_confidence_threshold:
-                            method = 'ai_auto'
-                        else:
-                            method = 'ai_manual_needed'
+                        method = self._decide_method(confidence, description)
 
                         suffix = None
                         linked = None

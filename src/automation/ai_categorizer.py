@@ -98,12 +98,10 @@ class ClaudeCategorizer:
         is_expense = amount_value < 0
         if is_expense:
             counterparty_orig = transaction.get(
-                'creditor', {}).get(
-                'name', 'Unknown')
+                'creditor', {}).get('name', '')
         else:
             counterparty_orig = transaction.get(
-                'debtor', {}).get(
-                'name', 'Unknown')
+                'debtor', {}).get('name', '')
 
         # Determine if income or expense
         is_income = amount > 0
@@ -229,36 +227,51 @@ Respond ONLY with the JSON object, nothing else. Remember: description must be i
 
         return prompt
 
+    @staticmethod
     def _build_local_description(
-        self, original_counterparty: str, ai_description: str, category: str
+        original_counterparty: str, ai_description: str, category: str = ""
     ) -> str:
         """
-        Build final description using original (non-anonymized) counterparty name.
-
-        This preserves personal context in local bookkeeping while keeping
-        the AI's categorization logic.
+        Build the final local description, degrading gracefully when there is
+        no usable counterparty name (e.g. card/POS payments, where the merchant
+        lives in the remittance and creditor/debtor name is empty).
 
         Args:
-            original_counterparty: Original counterparty name (may be personal)
+            original_counterparty: Original counterparty name (may be personal,
+                empty, or the legacy 'Unknown' sentinel)
             ai_description: AI's suggested description (based on anonymized data)
-            category: Selected category
+            category: Selected category (unused; kept for call-site compat)
 
         Returns:
-            Description with original counterparty name for local storage
+            A clean description, or "" when nothing usable could be built (the
+            caller then routes the transaction to manual review).
         """
-        # If AI's description contains "Private Person", replace with original
-        # name
-        if "Private Person" in ai_description:
-            return ai_description.replace(
-                "Private Person", original_counterparty)
+        cp = (original_counterparty or "").strip()
+        if cp.lower() == "unknown":
+            cp = ""
+        desc = (ai_description or "").strip()
 
-        # If original name is already in AI description, keep it
-        if original_counterparty in ai_description:
-            return ai_description
+        # Anonymized person placeholder: restore the real name if we have one,
+        # otherwise drop the placeholder without leaving dangling separators.
+        if "Private Person" in desc:
+            if cp:
+                return desc.replace("Private Person", cp).strip()
+            return desc.replace("Private Person", "").strip(" -–—|").strip()
 
-        # Otherwise, prepend original counterparty for context
-        # Example: "Jan de Vries - Payment received"
-        return f"{original_counterparty} - {ai_description}"
+        # No real counterparty: the AI description already carries the merchant.
+        if not cp:
+            return desc
+
+        # Counterparty name already present in the description -> keep it.
+        if cp in desc:
+            return desc
+
+        # Have a name but no AI description -> the name alone is meaningful.
+        if not desc:
+            return cp
+
+        # Default: prepend counterparty for context ("Jan de Vries - ...").
+        return f"{cp} - {desc}"
 
     def _parse_response(self, response_text: str) -> Optional[Dict[str, Any]]:
         """Parse Claude's JSON response."""
@@ -387,7 +400,7 @@ Respond ONLY with the JSON object, nothing else. Remember: description must be i
                         orig_tx = chunk_orig[i]
                         counterparty_orig = (
                             orig_tx.get('creditor', {}).get('name', '') or
-                            orig_tx.get('debtor', {}).get('name', '') or 'Unknown')
+                            orig_tx.get('debtor', {}).get('name', ''))
                         ai_desc = entry.get('description', '')
                         final_desc = self._build_local_description(
                             counterparty_orig, ai_desc, entry.get('category', ''))
