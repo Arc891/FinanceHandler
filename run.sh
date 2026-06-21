@@ -18,7 +18,10 @@ for arg in "$@"; do
   esac
 done
 
-SCRIPT_DIR="$HOME/.scripts"
+# Resolve the invoking user's home even under sudo (HOME is /root otherwise),
+# so we use the real ~/.scripts and not root's copy.
+SCRIPT_HOME="${SUDO_USER:+/home/$SUDO_USER}"
+SCRIPT_DIR="${SCRIPT_HOME:-$HOME}/.scripts"
 DOCKER_SCRIPT="$SCRIPT_DIR/docker-build-push.sh"
 
 # Check if docker-build-push.sh exists
@@ -85,6 +88,12 @@ ACTUAL_USER_HOME="${ACTUAL_USER_HOME:-$HOME}"
 
 # Set up Docker run arguments for the bot
 DOCKER_RUN_ARGS=(
+    # Use the host network stack: the docker bridge cannot currently egress to
+    # the internet on this host (Discord/Google/PyPI time out), but the host
+    # network can. Bot's API still serves on host port 8383. The -p flags from
+    # --port are ignored under host networking (harmless warning).
+    --network=host
+
     # Mount volumes for persistent data
     -v "$(pwd)/data:/app/data"
 
