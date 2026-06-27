@@ -18,10 +18,15 @@ for arg in "$@"; do
   esac
 done
 
-# Resolve the invoking user's home even under sudo (HOME is /root otherwise),
-# so we use the real ~/.scripts and not root's copy.
-SCRIPT_HOME="${SUDO_USER:+/home/$SUDO_USER}"
-SCRIPT_DIR="${SCRIPT_HOME:-$HOME}/.scripts"
+# Resolve the real (human) user even when launched as root WITHOUT sudo
+# (HOME would be /root, and SUDO_USER would be empty). We fall back to the
+# owner of this script, since the repo lives under that user's home. This is
+# used for both ~/.scripts and the ~/.local/bin/claude mount below.
+REAL_USER="${SUDO_USER:-$(stat -c '%U' "$0")}"
+REAL_HOME="$(getent passwd "$REAL_USER" | cut -d: -f6)"
+REAL_HOME="${REAL_HOME:-$HOME}"
+
+SCRIPT_DIR="$REAL_HOME/.scripts"
 DOCKER_SCRIPT="$SCRIPT_DIR/docker-build-push.sh"
 
 # Check if docker-build-push.sh exists
@@ -82,9 +87,17 @@ else
     exit 1
 fi
 
-# Determine actual user's home (not root when using sudo)
-ACTUAL_USER_HOME="${SUDO_USER:+/home/$SUDO_USER}"
-ACTUAL_USER_HOME="${ACTUAL_USER_HOME:-$HOME}"
+# Use the real user's home (resolved above) for the claude + config mounts.
+ACTUAL_USER_HOME="$REAL_HOME"
+
+# Fail loudly if the Claude CLI isn't where we expect: a missing bind-mount
+# source makes Docker create an empty dir, which the container then can't exec
+# ("Permission denied: 'claude'") and AI categorization silently degrades.
+if [[ ! -e "$ACTUAL_USER_HOME/.local/bin/claude" ]]; then
+    echo "⚠️  Claude CLI not found at $ACTUAL_USER_HOME/.local/bin/claude"
+    echo "    AI categorization will be disabled in the container."
+    echo "    (resolved real user: $REAL_USER)"
+fi
 
 # Set up Docker run arguments for the bot
 DOCKER_RUN_ARGS=(
