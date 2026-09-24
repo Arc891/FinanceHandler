@@ -1661,18 +1661,24 @@ nothing from Phase 1 and can run in parallel with it.
   template id collected; six months of real spans read and the boundary rule
   validated; the income category table confirmed to lack a placeholder; the
   code inspection in section 11.
-- Me: branch `feat/multi-month-upload`; `pytest.ini`; `requirements-dev.txt`;
-  CI fix (paths moved to `src/config/`, matrix 3.12, archive test excluded);
-  fixture script renumbers column 15; `csv_helper` carries
-  `bank_sequence_no` and guards `row[17]`;
-  `scripts/add_income_placeholder.py` written and dry-run against the
-  template.
-- User: review the `add_income_placeholder.py --dry-run` output, then let it
-  apply to the template and the five populated 2026 months. One text cell per
-  sheet (`Summary!H35`); the receiving `SUMIF` and the total already exist
-  (4.9), so nothing else changes.
-- Me: `scripts/register_sheets.py`, and seed `data/sheet_index.json` from the
-  31 ids in section 11 so the user pastes nothing.
+- Done 2026-09-24 (me): branch `feat/multi-month-upload`; `pytest.ini`;
+  `requirements-dev.txt`; CI fix (paths moved to `src/config/`, matrix 3.12,
+  `pytest` step, archive test excluded by `testpaths`); fixture script
+  renumbers column 15 through a fixed bijection (unique, stable across runs)
+  and gains `--duplicate-row N`; `csv_helper` carries `bank_sequence_no` and
+  guards `row[17]`; `scripts/add_income_placeholder.py` written and dry-run
+  against all seven targets, every one `would-write`;
+  `scripts/register_sheets.py` (`seed` / `add` / `paste` / `list`) on a new
+  pure module `finance_core/sheet_index.py` that `sheet_registry` will reuse;
+  `data/sheet_index.json` seeded with the six 2026 ids of section 11;
+  `.gitignore` gains `data/google/`, `data/runs/`, `data/*.json` and
+  un-ignores `tests/fixtures/*.csv`. 91 tests green.
+- User: review the `add_income_placeholder.py` dry-run output, then run it
+  with `--apply` on the template and the six 2026 months. `06/2026` is
+  included although it is empty: it was copied from the template before the
+  label existed, and it is the first month the backlog writes into. One text
+  cell per sheet (`Summary!H35`); the receiving `SUMIF` and the total already
+  exist (4.9), so nothing else changes.
 - User: Google Cloud project `asnexport` → OAuth consent screen: External,
   scopes **`spreadsheets` and `drive.file` only** — if the console offers to
   add any other `drive.*` scope, decline it; they are restricted and cost a
