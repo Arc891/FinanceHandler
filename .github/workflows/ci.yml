@@ -11,7 +11,8 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: [3.8, 3.9, "3.10", "3.11"]
+        # The Pi image runs 3.12 and the code uses 3.10+ syntax at runtime.
+        python-version: ["3.12"]
 
     env:
       # Mask any potential token-like values in logs
@@ -21,128 +22,55 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-
-      - name: Cache pip dependencies
-        uses: actions/cache@v3
-        with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
-          restore-keys: |
-            ${{ runner.os }}-pip-
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install flake8 pytest
+          pip install -r requirements.txt -r requirements-dev.txt
 
       - name: Lint with flake8
         run: |
           # Stop the build if there are Python syntax errors or undefined names
-          flake8 src/ --count --select=E9,F63,F7,F82 --show-source --statistics
+          flake8 src/ scripts/ --count --select=E9,F63,F7,F82 --show-source --statistics
           # Exit-zero treats all errors as warnings. GitHub editor is 127 chars wide
           flake8 src/ --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
 
       - name: Create data directories
-        run: |
-          mkdir -p data/sessions
-          mkdir -p data/uploads
-          echo "✅ Data directories created"
+        run: mkdir -p data/uploads
 
       - name: Setup configuration
         run: |
-          cp src/config_settings.example.py src/config_settings.py
-          echo "✅ Configuration file created from template"
-
+          cp src/config/config_settings.example.py src/config/config_settings.py
           # Ensure no real secrets are in the template
-          if grep -q "your_discord_token_here" src/config_settings.py; then
-            echo "✅ Using safe placeholder values"
+          if grep -q "your_discord_token_here" src/config/config_settings.py; then
+            echo "Using safe placeholder values"
           else
-            echo "❌ Template may contain real values"
+            echo "Template may contain real values"
             exit 1
           fi
 
       - name: Test imports
+        working-directory: src
         run: |
           python -c "
-          import sys
-          import os
-          sys.path.append('src')
-
-          try:
-              from config_settings import *
-              print('✅ Config imports successful')
-          except Exception as e:
-              print(f'❌ Config import error: {e}')
-              sys.exit(1)
-
-          try:
-              import bot_commands
-              print('✅ Bot commands module imports successful')
-          except Exception as e:
-              print(f'❌ Bot commands import error: {e}')
-              sys.exit(1)
-
-          try:
-              from finance_core.export import process_csv_file
-              from finance_core.session_management import session_exists, SESSION_DIR
-              from finance_core.csv_helper import load_transactions_from_csv
-              print('✅ Finance core modules import successful')
-              print(f'✅ Session directory resolved to: {SESSION_DIR}')
-          except Exception as e:
-              print(f'❌ Finance core import error: {e}')
-              sys.exit(1)
-
-          print('🎉 All imports successful!')
+          import config.config_settings
+          import bot_commands
+          from finance_core.export import process_csv_file
+          from finance_core.csv_helper import load_transactions_from_csv
+          print('All imports successful')
           "
 
-      - name: Test configuration
-        run: |
-          python -c "
-          import sys
-          sys.path.append('src')
-          from config_settings import DISCORD_TOKEN, DAILY_REMINDER_TIME, UPLOAD_DIR, SESSION_DIR
-          print(f'Token placeholder: {DISCORD_TOKEN}')
-          print(f'Reminder time: {DAILY_REMINDER_TIME}')
-          print(f'Upload directory: {UPLOAD_DIR}')
-          print(f'Session directory: {SESSION_DIR}')
-          print('✅ Configuration test passed')
-          "
-
-      - name: Test data directory structure
-        run: |
-          python -c "
-          import sys
-          import os
-          sys.path.append('src')
-
-          from finance_core.session_management import SESSION_DIR
-          from config_settings import UPLOAD_DIR
-
-          print(f'Session directory resolved to: {SESSION_DIR}')
-          print(f'Upload directory configured as: {UPLOAD_DIR}')
-
-          # Check if directories exist
-          print(f'Session directory exists: {os.path.exists(SESSION_DIR)}')
-          upload_abs_path = os.path.join(os.getcwd(), UPLOAD_DIR)
-          print(f'Upload directory exists: {os.path.exists(upload_abs_path)}')
-
-          # Test path independence - run from different directories
-          os.chdir('src')
-          from finance_core.session_management import SESSION_DIR as session_from_src
-          print(f'Session directory from src/: {session_from_src}')
-
-          if SESSION_DIR == session_from_src:
-              print('✅ Path resolution is working directory independent')
-          else:
-              print('❌ Path resolution is working directory dependent')
-              sys.exit(1)
-
-          print('✅ Data directory structure test passed')
-          "
+      - name: Run tests
+        # pytest.ini limits collection to tests/, so the archived browsercode
+        # script, which aborts collection, is never picked up.
+        run: pytest -q
 
   security:
     runs-on: ubuntu-latest
@@ -150,17 +78,16 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12"
 
       - name: Setup configuration for security tests
         run: |
           # Create necessary directories
-          mkdir -p data/sessions
           mkdir -p data/uploads
           # Setup configuration
-          cp src/config_settings.example.py src/config_settings.py
+          cp src/config/config_settings.example.py src/config/config_settings.py
           echo "✅ Configuration file created from template for security tests"
 
       - name: Install dependencies for security tests
@@ -200,7 +127,7 @@ jobs:
           fi
 
           # Check gitignore for sensitive files
-          if grep -q "\.env\|config_settings\.py\|google_service_account\.json" .gitignore 2>/dev/null; then
+          if grep -q "\.env\|config_settings\.py\|google_service_account\.json\|data/google/" .gitignore 2>/dev/null; then
             echo "✅ Sensitive files properly ignored in .gitignore"
           else
             echo "⚠️ Consider adding sensitive files to .gitignore"
@@ -214,7 +141,7 @@ jobs:
           sys.path.append('src')
 
           # Test that config uses environment variables properly
-          from config_settings import DISCORD_TOKEN, GOOGLE_CREDENTIALS_PATH
+          from config.config_settings import DISCORD_TOKEN
 
           # Ensure default values are placeholders, not real secrets
           if DISCORD_TOKEN and DISCORD_TOKEN != 'your_discord_token_here' and len(DISCORD_TOKEN) > 50:
