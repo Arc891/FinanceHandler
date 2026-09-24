@@ -82,6 +82,11 @@ data/pending_approvals.json
 data/failed_uploads.json
 data/backups/
 data/browser_profile/
+# OAuth client and token, run state, and the state files (sheet_index.json is
+# authoritative and must be backed up, not committed)
+data/google/
+data/runs/
+data/*.json
 *.csv
 *.xlsx
 *.xls
@@ -134,5 +139,7 @@ Thumbs.db
 !.env.example
 !config_settings.example.py
 !src/config/google_service_account.example.json
+# Anonymised test fixtures, reviewed before commit
+!tests/fixtures/*.csv
 
 /[A-Z_]*.md
