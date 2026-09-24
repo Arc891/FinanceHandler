@@ -13,15 +13,24 @@ personal:
   replaced  : amounts (random, same sign, similar size bucket), IBANs, person
               names (consistent Persoon A/B/C per distinct name), long
               reference numbers, UUID-style references, balance column
+  renumbered: the bank sequence number (column 15), through a fixed bijection,
+              so every transaction keeps a unique number and the same real
+              number maps to the same fake one in every run
   dropped   : nothing structural; column count and order are unchanged
 
 Usage:
     venv/bin/python scripts/make_fixture.py <real_export.csv> tests/fixtures/<name>.csv
+    venv/bin/python scripts/make_fixture.py <in.csv> <out.csv> --duplicate-row 12
     venv/bin/python scripts/sheet_shape.py csv tests/fixtures/<name>.csv   # verify shape
+
+--duplicate-row N (repeatable) inserts an exact copy of line N of the input
+directly after it, with its own sequence number: two identical purchases on
+one day, which the dedup logic must keep as two rows.
 
 Review the output before committing it. The input file is not modified.
 """
 
+import argparse
 import csv
 import logging
 import os
@@ -47,6 +56,13 @@ LONG_NUM_RE = re.compile(r"\b\d{6,}\b")
 NAME_TOKEN_RE = re.compile(r"\b(?:Mw|Dhr|Mevr|Mr|Mrs|MW\.|DHR\.)\.?\s+[A-Z][\w.]*(?:\s+[A-Z][\w.]*)*", re.IGNORECASE)
 
 FAKE_IBAN = "NL00TEST0000000001"
+
+# Sequence numbers go through x -> (A*x + B) mod M. A is coprime to 10, so the
+# map is a bijection on [0, M): distinct inputs stay distinct. A-1 is even and
+# B is odd, so no number maps to itself.
+SEQ_MOD = 10 ** 12
+SEQ_MUL = 982_451_653
+SEQ_ADD = 104_729_123
 
 
 class FixtureAnonymiser:
@@ -118,6 +134,14 @@ class FixtureAnonymiser:
             out = out.replace(token, uuid)
         return out
 
+    def sequence(self, real: str) -> str:
+        real = real.strip()
+        if not real:
+            return ""
+        if not real.isdigit():
+            return "0" * len(real)
+        return str((SEQ_MUL * int(real) + SEQ_ADD) % SEQ_MOD)
+
     def _fake_uuid(self, real: str) -> str:
         if real not in self.uuid_map:
             self.uuid_map[real] = "%08x-%04x-%04x-%04x-%012x" % tuple(
@@ -125,13 +149,20 @@ class FixtureAnonymiser:
         return self.uuid_map[real]
 
 
-def convert(src: str, dst: str) -> None:
+def _is_data_row(row) -> bool:
+    return bool(row) and len(row) >= 18 and bool(row[0].strip())
+
+
+def convert(src: str, dst: str, duplicate_rows=()) -> None:
     fx = FixtureAnonymiser()
     with open(src, newline="", encoding="utf-8") as fh:
         rows = list(csv.reader(fh))
+    for n in duplicate_rows:
+        if not 1 <= n <= len(rows) or not _is_data_row(rows[n - 1]):
+            raise ValueError(f"--duplicate-row {n}: line {n} is not a transaction row in {src}")
     out_rows = []
     for row in rows:
-        if not row or len(row) < 18 or not row[0].strip():
+        if not _is_data_row(row):
             out_rows.append(row)
             continue
         new = list(row)
@@ -141,11 +172,20 @@ def convert(src: str, dst: str) -> None:
         new[3] = fx.counterparty(row[3])
         new[8] = ""                             # running balance: drop
         new[10] = fx.amount(row[10])
-        new[15] = "0" * len(row[15].strip()) if row[15].strip() else row[15]  # sequence no.
+        new[15] = fx.sequence(row[15])          # sequence no.
         new[17] = fx.remittance(row[17], original_cp)
         if len(new) > 19:
             new[19] = row[19]                   # bank's own category label: keep
         out_rows.append(new)
+    # Copies are inserted last, so their fresh sequence numbers can avoid every
+    # number already in the file.
+    used = {r[15] for r in out_rows if _is_data_row(r)}
+    for n in sorted(set(duplicate_rows), reverse=True):
+        copy = list(out_rows[n - 1])
+        fresh = max((int(u) for u in used if u.isdigit()), default=0) + 1
+        copy[15] = str(fresh)
+        used.add(copy[15])
+        out_rows.insert(n, copy)
     os.makedirs(os.path.dirname(os.path.abspath(dst)), exist_ok=True)
     with open(dst, "w", newline="", encoding="utf-8") as fh:
         csv.writer(fh, quoting=csv.QUOTE_MINIMAL).writerows(out_rows)
@@ -154,8 +194,20 @@ def convert(src: str, dst: str) -> None:
     print("review it, then: venv/bin/python scripts/sheet_shape.py csv", dst)
 
 
+def main(argv) -> int:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("src", help="real ASN export (read only)")
+    parser.add_argument("dst", help="anonymised output, e.g. tests/fixtures/multi_month.csv")
+    parser.add_argument("--duplicate-row", type=int, action="append", default=[], metavar="N",
+                        help="insert a copy of input line N right after it (repeatable)")
+    args = parser.parse_args(argv)
+    try:
+        convert(args.src, args.dst, duplicate_rows=args.duplicate_row)
+    except ValueError as exc:
+        print(exc, file=sys.stderr)
+        return 1
+    return 0
+
+
 if __name__ == "__main__":
-    if len(sys.argv) != 3:
-        print(__doc__)
-        sys.exit(1)
-    convert(sys.argv[1], sys.argv[2])
+    sys.exit(main(sys.argv[1:]))
