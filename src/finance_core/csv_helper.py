@@ -34,7 +34,7 @@ def load_transactions_from_csv(csv_path: str) -> List[Dict[str, Any]]:
      11,12: (ignored)
      13: bank_transaction_code (e.g. '8809')
      14: sub_code (e.g. 'OVS')
-     15: (ignored)
+     15: bank_sequence_no (the bank's own transaction number)
      16: (ignored)
      17: remittance_information (long string)
 
@@ -46,6 +46,7 @@ def load_transactions_from_csv(csv_path: str) -> List[Dict[str, Any]]:
       - debtor:   { name: counterparty_name } if expense, else {}
       - creditor: { name: counterparty_name } if income,  else {}
       - remittance_information: [ remittance ] or []
+      - bank_sequence_no: column 15 as a string, '' when absent
 
     Any rows with missing/empty booking_date are skipped.
     """
@@ -78,6 +79,7 @@ def load_transactions_from_csv(csv_path: str) -> List[Dict[str, Any]]:
 
             rem = row[17].strip() if len(row) > 17 else ""
             rem_list = [rem] if rem else []
+            bank_sequence_no = row[15].strip()
 
             # 2) Determine credit/debit and set debtor/creditor names
             if amt < 0:
@@ -101,7 +103,8 @@ def load_transactions_from_csv(csv_path: str) -> List[Dict[str, Any]]:
                 },
                 "debtor": {"name": debtor_name},
                 "creditor": {"name": creditor_name},
-                "remittance_information": rem_list
+                "remittance_information": rem_list,
+                "bank_sequence_no": bank_sequence_no,
             }
             txs.append(tx)
 
@@ -123,6 +126,10 @@ def normalize_csv_data(csv_path: str) -> None:
         rows = [row for row in reader]
 
     for row in rows:
+        # Rows without a remittance column (blank lines, truncated rows) are
+        # left untouched; load_transactions_from_csv skips them.
+        if len(row) <= 17:
+            continue
         for uuid in SPAARPOT_UUID_MAP.keys():
             if f"Referentie: {uuid}" in row[17]:
                 # Row contains a UUID reference, change it to the mapped name
