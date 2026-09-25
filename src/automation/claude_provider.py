@@ -10,8 +10,11 @@ This allows using Claude Code as a fallback to avoid API costs.
 
 import json
 import logging
+import os
+import signal
 import subprocess
 import asyncio
+import tempfile
 from typing import Optional
 
 # Make anthropic optional - only needed if using API
@@ -33,6 +36,11 @@ class ClaudeProvider:
     1. Claude Code CLI (if available)
     2. Anthropic API (if API key provided)
     """
+
+    # Seconds one CLI call may take (the first request may be slow), and
+    # seconds to wait for the process to be reaped after it is killed.
+    cli_timeout = 180
+    kill_grace = 10
 
     def __init__(self, api_key: Optional[str] = None, model: str = "haiku"):
         """
@@ -166,41 +174,46 @@ class ClaudeProvider:
 
             logger.debug(f"Calling Claude Code CLI with model: {self.model}")
 
-            # Use async subprocess to avoid blocking Discord bot
-            process = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-
-            # Wait for completion with timeout
-            try:
-                stdout, stderr = await asyncio.wait_for(
-                    process.communicate(),
-                    timeout=180  # 3 minutes max (first request may be slow)
-                )
-            except asyncio.CancelledError:
-                # The run's AI budget cancelled this call: never leave the
-                # claude process running behind it.
-                process.kill()
-                await process.wait()
-                raise
-            except asyncio.TimeoutError:
-                process.kill()
-                await process.wait()
-                logger.error(
-                    "Claude Code CLI timeout (180s). "
-                    "First-time use may require manual approval. "
-                    "Try: claude -p 'test' manually first."
-                )
-                raise RuntimeError(
-                    "Claude Code CLI timed out. "
-                    "If this is your first time, run 'claude -p \"test\"' manually to initialize."
+            # Output goes to temp files, not pipes: in Python 3.12
+            # process.wait() only returns once every pipe has closed, and a
+            # child of claude that outlives it would hold a pipe open forever.
+            # Its own session lets a kill reach that child too.
+            with tempfile.TemporaryFile() as out, \
+                    tempfile.TemporaryFile() as err:
+                process = await asyncio.create_subprocess_exec(
+                    *cmd,
+                    stdin=asyncio.subprocess.DEVNULL,
+                    stdout=out,
+                    stderr=err,
+                    start_new_session=True
                 )
 
-            # Decode output
-            stdout_str = stdout.decode('utf-8') if stdout else ""
-            stderr_str = stderr.decode('utf-8') if stderr else ""
+                try:
+                    await asyncio.wait_for(process.wait(),
+                                           timeout=self.cli_timeout)
+                except asyncio.CancelledError:
+                    # The run's AI budget cancelled this call: never leave
+                    # the claude process running behind it.
+                    await self._kill_cli(process)
+                    raise
+                except asyncio.TimeoutError:
+                    await self._kill_cli(process)
+                    logger.error(
+                        f"Claude Code CLI timeout ({self.cli_timeout}s). "
+                        "First-time use may require manual approval. "
+                        "Try: claude -p 'test' manually first."
+                    )
+                    raise RuntimeError(
+                        "Claude Code CLI timed out. "
+                        "If this is your first time, run 'claude -p \"test\"' manually to initialize."
+                    )
+                # Anything claude left running would outlive the call.
+                self._kill_group(process)
+
+                out.seek(0)
+                err.seek(0)
+                stdout_str = out.read().decode('utf-8', errors='replace')
+                stderr_str = err.read().decode('utf-8', errors='replace')
 
             if process.returncode != 0:
                 error_msg = stderr_str or "Unknown error"
@@ -225,6 +238,23 @@ class ClaudeProvider:
         except Exception as e:
             logger.error(f"CLI completion failed: {e}")
             raise
+
+    @staticmethod
+    def _kill_group(process) -> None:
+        """SIGKILL the CLI's process group (claude and its children)."""
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass
+
+    async def _kill_cli(self, process) -> None:
+        """Kill the CLI's process group and wait, boundedly, for the reap."""
+        self._kill_group(process)
+        try:
+            await asyncio.wait_for(process.wait(), timeout=self.kill_grace)
+        except asyncio.TimeoutError:
+            logger.error(
+                f"Claude Code CLI not reaped {self.kill_grace}s after kill")
 
     async def _complete_api(
             self, prompt: str, max_tokens: int, temperature: float) -> str:

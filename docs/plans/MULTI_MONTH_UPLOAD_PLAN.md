@@ -1952,8 +1952,12 @@ on the Pi and set `AI_RUN_MAX_MINUTES` from it.
     it, so the budget can overrun by one per-row call (tens of seconds).
   - Re-timed 2026-09-25 (user, Pi, fixture, `--chunks 2`, 80 AI rows):
     `--parallel 1` took **160.4 s** (about 80 s per chunk, as in
-    Phase 2). The `--parallel 3` elapsed line is still to be recorded.
-    Neither run had a no-answer row.
+    Phase 2), with no failed chunk. `--parallel 3` took **184.7 s**, but
+    one of its two chunks failed ("Claude Code CLI error: Unknown error",
+    a non-zero exit with empty stderr), and the time includes the 10
+    per-row fallback calls that followed (`ai_auto 20, ai_manual_needed
+    30, none 30, regex 68`). A clean parallel-3 time needs a rerun once
+    chunk failures are handled.
 - Done 2026-09-25 (me), step 3, 449 tests green:
   - `export.py` is now `Pipeline` with `process_upload`, `resume`,
     `cancel`, `sort` and `status`. It has no Discord import. Progress is
@@ -2158,11 +2162,32 @@ measures them on months where the right answer is already known.
     - give each chunk an outer timeout in `categorize_batch`.
 
     Then rerun Haiku, and pick the model.
-  - The no-answer rows are the next diagnosis. The timing run below
-    (fixture, 2 chunks) had none, at parallel 1 or 3, and printed no
-    errors. So the failures probably build up over a long run, from
-    rate or usage limits or from the same cleanup fault. Count the CLI's
-    error types (never their text) over a long run to find out.
+  - Done 2026-09-25 (me), the hang fix, 456 tests green:
+    - `_complete_cli` writes stdout and stderr to temporary files, gives
+      `claude` `stdin=DEVNULL` (`claude -p` appends piped stdin to the
+      prompt, so an inherited open stdin could block it) and its own
+      session, and on timeout or cancel SIGKILLs the process group, then
+      waits at most `kill_grace` (10 s) for the reap. After a normal exit
+      it also kills the group, so nothing claude started outlives the
+      call. `cli_timeout` (180 s) and `kill_grace` are class attributes.
+    - `categorize_batch` takes `chunk_timeout` (default `CHUNK_TIMEOUT`,
+      420 s: the batch call plus a repair call, each 180 s, plus the
+      kills). It runs inside the semaphore, so time queued for a slot
+      does not count; a timed-out chunk's rows stay `None` for fallback.
+    - `tests/test_cli_process.py` runs a real fake `claude` that leaves a
+      grandchild holding stdout. Before the fix, the timeout test hung
+      indefinitely, reproducing the Pi hang. A mutation pass (own
+      session, post-exit group kill, stdin, parent-only kill, chunk
+      timeout, semaphore) is caught in full.
+  - The no-answer rows are the next diagnosis. The fixture timing run
+    above failed one chunk at `--parallel 3` with "Unknown error" (a
+    non-zero exit, empty stderr, and `_complete_cli` reads only stderr).
+    Parallelism is not established as the cause (low-to-moderate
+    confidence): with two chunks only two calls ran at once, and three
+    concurrent trivial calls in the container all exited 0. Next, test
+    first: surface the CLI's JSON error fields from stdout on a non-zero
+    exit, and retry a failed chunk once before the per-row fallback.
+    Count the error types (never their text) over a long run.
 - Later, in its own session: a local model or Jev, scored with the same
   script (`/home/wsl/Coding/jev-investigation.md`).
 

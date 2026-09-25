@@ -23,6 +23,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Seconds one chunk may run: the batch call plus a repair call, each bounded
+# by ClaudeProvider.cli_timeout (180 s), with room for the kills.
+CHUNK_TIMEOUT = 420
+
 
 class ClaudeCategorizer:
     """Categorizes transactions using Claude API with confidence scoring."""
@@ -314,7 +318,8 @@ Respond ONLY with the JSON object, nothing else. Remember: description must be i
         income_categories: Dict[str, str],
         example_rules: Dict[str, Tuple[str, str]],
         deadline: Optional[float] = None,
-        max_parallel: int = 3
+        max_parallel: int = 3,
+        chunk_timeout: float = CHUNK_TIMEOUT
     ) -> list:
         """
         Categorize a batch of transactions, one AI call per chunk of 40.
@@ -323,7 +328,8 @@ Respond ONLY with the JSON object, nothing else. Remember: description must be i
         prompt holds only its own rows plus the pre-categorized context, so
         running them together gives the same result as one after another.
         A chunk unfinished at deadline (time.monotonic() seconds) is
-        cancelled.
+        cancelled, and so is one still running chunk_timeout seconds after
+        it started (time spent queued for a slot does not count).
 
         Returns list of (category, description, confidence, relationship_info) tuples.
         Returns None at positions where categorization failed or timed out.
@@ -360,10 +366,16 @@ Respond ONLY with the JSON object, nothing else. Remember: description must be i
 
         async def run(chunk, offset):
             async with semaphore:
-                await self._categorize_chunk(
-                    *chunk, offset, all_results, anon_precategorized,
-                    precategorized_transactions, expense_categories,
-                    income_categories, example_rules, name_mapping)
+                try:
+                    await asyncio.wait_for(self._categorize_chunk(
+                        *chunk, offset, all_results, anon_precategorized,
+                        precategorized_transactions, expense_categories,
+                        income_categories, example_rules, name_mapping),
+                        timeout=chunk_timeout)
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        f"AI chunk timed out after {chunk_timeout:.0f}s; "
+                        f"{len(chunk[2])} row(s) left for fallback")
 
         tasks, offset = [], 0
         for chunk in chunks:

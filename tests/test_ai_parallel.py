@@ -16,6 +16,7 @@ import time
 import pytest
 
 from automation.ai_categorizer import ClaudeCategorizer
+from automation import claude_provider
 from automation.claude_provider import ClaudeProvider
 from finance_core import categorization_engine as ce
 from finance_core.categorization_engine import CategorizationEngine
@@ -142,6 +143,31 @@ async def test_deadline_cancels_the_unfinished_chunks():
     assert provider.in_flight == 0
 
 
+async def test_hung_chunk_times_out_without_a_deadline():
+    """With no run deadline, a chunk that never answers must still end."""
+    provider = ChunkProvider(delay=lambda first: 3600.0 if first == 41 else 0.0)
+    started = time.monotonic()
+    results = await asyncio.wait_for(
+        run_batch(categorizer(provider), unmatched_rows(100),
+                  max_parallel=3, chunk_timeout=0.2),
+        timeout=15)
+    assert time.monotonic() - started < 5
+    got = categories(results)
+    assert got[:40] == [f"cat-T{i}" for i in range(1, 41)]
+    assert got[40:80] == [None] * 40
+    assert got[80:] == [f"cat-T{i}" for i in range(81, 101)]
+    assert provider.cancelled == [41]
+    assert provider.in_flight == 0
+
+
+async def test_chunk_timeout_does_not_count_time_spent_queued():
+    """Three 0.1 s chunks one at a time take 0.3 s; each still fits 0.25 s."""
+    provider = ChunkProvider(delay=lambda first: 0.1)
+    results = await run_batch(categorizer(provider), unmatched_rows(100),
+                              max_parallel=1, chunk_timeout=0.25)
+    assert categories(results) == [f"cat-T{i}" for i in range(1, 101)]
+
+
 async def test_deadline_already_passed_makes_no_call():
     provider = ChunkProvider()
     results = await run_batch(categorizer(provider), unmatched_rows(5),
@@ -239,20 +265,26 @@ async def test_c_id_out_of_range_is_ignored():
 # ── ClaudeProvider: a cancelled CLI call kills its process ──────────────────
 
 class HangingProcess:
+    """Never exits on its own; its process group is killed by pid."""
+
+    pid = 4242
+
     def __init__(self):
         self.killed = False
         self.waited = False
         self.returncode = None
+        self._exited = asyncio.Event()
 
-    async def communicate(self):
-        await asyncio.sleep(3600)
-
-    def kill(self):
+    def kill_group(self, pgid, sig):
+        assert pgid == self.pid
         self.killed = True
+        self.returncode = -sig
+        self._exited.set()
 
     async def wait(self):
+        await self._exited.wait()
         self.waited = True
-        return -9
+        return self.returncode
 
 
 async def test_cancelled_cli_call_kills_its_process(monkeypatch):
@@ -262,6 +294,7 @@ async def test_cancelled_cli_call_kills_its_process(monkeypatch):
         return process
 
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+    monkeypatch.setattr(claude_provider.os, "killpg", process.kill_group)
     provider = ClaudeProvider.__new__(ClaudeProvider)
     provider.model, provider.use_cli, provider.api_client = "sonnet", True, None
 
