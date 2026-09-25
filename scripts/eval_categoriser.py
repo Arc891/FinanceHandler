@@ -59,6 +59,8 @@ UNDECIDED = {"! Nog in te delen !", "CACHED"}
 NAME_MAX = 40            # longest category name the report prints
 SHOW_MIN = 2             # an unmapped name must occur this often to be shown
 THRESHOLDS = (0.9, 0.6, 0.0)
+MIN_INTERVAL = 1.2        # seconds between Sheets calls: under 50 a minute
+RETRY_DELAYS = (20, 40, 80)
 SHEET_NAME = re.compile(r"^Maandelijks Budget (\d{2})/(\d{4})$")
 DMY = re.compile(r"^\d{1,2}-\d{1,2}-\d{4}$")
 ISO = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -172,32 +174,46 @@ def select_sheets(files, years, only):
     return picked, ignored
 
 
-def read_sheets(gc, picked, tab, say, sleep=time.sleep):
-    """Every sheet's rows. Reads retry 429 and 5xx: Sheets allows 60 reads a minute."""
+def read_sheets(gc, picked, tab, say, sleep=time.sleep, clock=time.monotonic):
+    """Every sheet's rows, in two requests per sheet (open, one batchGet).
+
+    Sheets allows 60 reads a minute and a refused request still counts, so
+    calls are spaced MIN_INTERVAL apart and a 429 or 5xx waits RETRY_DELAYS.
+    """
     from finance_core.google_retry import status_of, with_retry
+    last = [None]
 
     def call(fn, what):
-        return with_retry(fn, sleep=sleep, what=what)
+        def paced():
+            if last[0] is not None:
+                wait = MIN_INTERVAL - (clock() - last[0])
+                if wait > 0:
+                    sleep(wait)
+            last[0] = clock()
+            return fn()
+        return with_retry(paced, delays=RETRY_DELAYS, sleep=sleep, what=what)
 
+    ranges = [f"'{tab}'!B1:E", f"'{tab}'!G1:J"]
     rows = []
     for label, sheet_id in picked:
         sh = call(lambda: gc.open_by_key(sheet_id), f"open {label}")
         try:
-            ws = call(lambda: sh.worksheet(tab), f"tab {label}")
+            got = call(lambda: sh.values_batch_get(
+                ranges, params={"valueRenderOption": "UNFORMATTED_VALUE"}), f"read {label}")
         except Exception as exc:
-            if status_of(exc) is not None:
+            if status_of(exc) != 400:            # 400: the range names no such tab
                 raise
             tabs = [w.title for w in call(sh.worksheets, f"tabs {label}")]
             say(f"  {label}: no {tab!r} tab (tabs: {tabs}); skipped")
             continue
+        value_ranges = got.get("valueRanges", [])
         parts = []
-        for block, a1 in (("expenses", "B1:E"), ("income", "G1:J")):
-            values = call(lambda: ws.get(a1, value_render_option="UNFORMATTED_VALUE"),
-                          f"read {label} {block}")
+        for i, block in enumerate(("expenses", "income")):
+            values = value_ranges[i].get("values", []) if i < len(value_ranges) else []
             start = detect_start_row(values)
-            got = block_rows(label, block, values, start) if start else []
-            rows.extend(got)
-            parts.append(f"{block} from row {start} ({len(got)} rows)" if start
+            block_got = block_rows(label, block, values, start) if start else []
+            rows.extend(block_got)
+            parts.append(f"{block} from row {start} ({len(block_got)} rows)" if start
                          else f"{block} empty")
         say(f"  {label}: " + ", ".join(parts))
     return rows

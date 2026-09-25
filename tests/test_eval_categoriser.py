@@ -263,26 +263,43 @@ def test_map_argument_splits_on_the_first_equals_sign(arg, expected):
     assert ev.parse_pair(arg) == expected
 
 
-class FakeWs:
-    def __init__(self, blocks):
-        self.blocks = blocks
+class FakeBook:
+    """A spreadsheet answering one batchGet for both blocks of a tab."""
 
-    def get(self, a1, value_render_option=None):
-        assert value_render_option == "UNFORMATTED_VALUE"
-        return self.blocks[a1]
+    def __init__(self, blocks, tab="Transactions"):
+        self.blocks, self.tab, self.batch_calls = blocks, tab, 0
+
+    def values_batch_get(self, ranges, params=None):
+        self.batch_calls += 1
+        assert params == {"valueRenderOption": "UNFORMATTED_VALUE"}
+        out = []
+        for r in ranges:
+            tab, _, a1 = r.rpartition("!")
+            if tab.strip("'") != self.tab:
+                raise RateLimited(400)
+            out.append({"range": r, "values": self.blocks[a1]} if self.blocks[a1]
+                       else {"range": r})
+        return {"valueRanges": out}
+
+    def worksheets(self):
+        return [SimpleNamespace(title=self.tab)]
 
 
 class FakeGc:
     def __init__(self, books):
         self.books = books
+        self.opened = {}
 
     def list_spreadsheet_files(self):
         return [{"name": f"Maandelijks Budget {label}", "id": label}
                 for label in self.books]
 
     def open_by_key(self, key):
-        ws = FakeWs(self.books[key])
-        return SimpleNamespace(worksheet=lambda tab: ws, worksheets=lambda: [ws])
+        book = self.books[key]
+        if isinstance(book, dict):
+            book = FakeBook(book)
+        self.opened[key] = book
+        return book
 
 
 def test_dry_run_end_to_end_prints_structure_only(monkeypatch, capsys,
@@ -297,6 +314,7 @@ def test_dry_run_end_to_end_prints_structure_only(monkeypatch, capsys,
         "G1:J": [["Date"], [], [], [45369, 1234.56, SECRET_NAME, "Salaris"]]}}
     monkeypatch.setattr(ev, "load_exports", lambda paths: (txs, 0))
     monkeypatch.setattr(ev, "service_account_client", lambda p: FakeGc(books))
+    monkeypatch.setattr(ev, "MIN_INTERVAL", 0.0)
     code = ev.main(["--dry-run", "--map", "Eten=Boodschappen", "x.csv"])
     out = capsys.readouterr().out
     assert code == 0
@@ -326,27 +344,66 @@ class RateLimited(Exception):
         self.response = SimpleNamespace(status_code=status)
 
 
-class FlakyWs(FakeWs):
+class FlakyBook(FakeBook):
     def __init__(self, blocks, failures):
         super().__init__(blocks)
         self.failures = failures
 
-    def get(self, a1, value_render_option=None):
+    def values_batch_get(self, ranges, params=None):
         if self.failures:
             self.failures -= 1
             raise RateLimited()
-        return super().get(a1, value_render_option)
+        return super().values_batch_get(ranges, params)
 
 
-def test_sheet_reads_retry_a_rate_limit():
-    ws = FlakyWs({"B1:E": [[45368, 1, "d", "Boodschappen"]], "G1:J": []}, 2)
-    gc = SimpleNamespace(open_by_key=lambda key: SimpleNamespace(
-        worksheet=lambda tab: ws, worksheets=lambda: [ws]))
-    slept = []
-    lines = []
-    rows = ev.read_sheets(gc, [("03/2024", "x")], "Transactions",
-                          lines.append, sleep=slept.append)
-    assert len(rows) == 1 and len(slept) == 2
+BLOCKS = {"B1:E": [[45368, 1, "d", "Boodschappen"]], "G1:J": []}
+
+
+def read(gc, picked, clock=lambda: 0.0):
+    slept, lines = [], []
+    rows = ev.read_sheets(gc, picked, "Transactions", lines.append,
+                          sleep=slept.append, clock=clock)
+    return rows, slept, lines
+
+
+def test_sheet_reads_retry_a_rate_limit_with_long_waits():
+    gc = FakeGc({"x": FlakyBook(BLOCKS, 2)})
+    rows, slept, _ = read(gc, [("03/2024", "x")])
+    assert len(rows) == 1
+    assert [s for s in slept if s >= 20] == [20, 40]
+
+
+def test_one_sheet_costs_two_requests():
+    gc = FakeGc({"x": dict(BLOCKS)})
+    read(gc, [("03/2024", "x")])
+    assert gc.opened["x"].batch_calls == 1
+
+
+def test_requests_are_spaced_out():
+    """With a clock that never moves, every call after the first waits."""
+    gc = FakeGc({"x": dict(BLOCKS), "y": dict(BLOCKS)})
+    _, slept, _ = read(gc, [("03/2024", "x"), ("04/2024", "y")])
+    assert slept == [ev.MIN_INTERVAL] * 3        # open, batch, open, batch
+
+
+def test_no_wait_once_the_interval_has_passed():
+    ticks = iter(range(0, 1000, 10))
+    gc = FakeGc({"x": dict(BLOCKS), "y": dict(BLOCKS)})
+    _, slept, _ = read(gc, [("03/2024", "x"), ("04/2024", "y")],
+                       clock=lambda: float(next(ticks)))
+    assert slept == []
+
+
+def test_missing_tab_is_reported_and_skipped():
+    gc = FakeGc({"x": FakeBook(BLOCKS, tab="Blad1")})
+    rows, _, lines = read(gc, [("03/2024", "x")])
+    assert rows == [] and "no 'Transactions' tab (tabs: ['Blad1'])" in lines[0]
+
+
+def test_a_rate_limit_that_persists_still_stops_the_run():
+    gc = FakeGc({"x": FlakyBook(BLOCKS, 10)})
+    with pytest.raises(RateLimited):
+        read(gc, [("03/2024", "x")])
 
 
 def test_a_google_error_prints_its_status_but_not_its_message(capsys):
