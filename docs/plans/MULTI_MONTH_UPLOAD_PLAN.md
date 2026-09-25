@@ -2007,7 +2007,40 @@ measures them on months where the right answer is already known.
      scored the same way.
 - Run time: about 24 months at about two chunks each is about 48 chunks per
   run, so about 30 minutes per run with 2a's parallelism. The script runs
-  from the workstation's venv, not the Pi.
+  **on the Pi, inside the bot's container**, with this branch's code via
+  `--src`, so the eval uses production's setup.
+- Account (user, 2026-09-25): the Claude CLI on the workstation and on the
+  Pi is the Anamata Claude Team seat. The user has no personal account.
+  Business terms exclude training on the data. It is the account production
+  already uses, so the eval adds no new exposure.
+- Done 2026-09-25 (me), 396 tests green: `scripts/eval_categoriser.py` and
+  `tests/test_eval_categoriser.py`. Beyond the design above:
+  - `--dry-run` reads and matches only. It shows each sheet's detected
+    layout and the match counts before any AI time is spent.
+  - The data start row is detected per block: the first row whose date
+    cell holds a date.
+  - A row found only in the other block (moved there by hand) is counted
+    and not scored.
+  - A key group of several rows is scored as a multiset intersection.
+  - The service account is used read-only (`spreadsheets.readonly`,
+    `drive.readonly`). `--sheet LABEL=ID` covers sheets the listing does
+    not find.
+  - Privacy:
+    - Every log record goes to a counting handler; its message is never
+      printed.
+    - A crash prints only the exception type and file:line.
+    - An unmapped category name is shown only if it occurs at least twice,
+      cut at 40 characters.
+    - Tests assert that no name, remittance, amount or date from the input
+      reaches the output. A mutation pass confirmed they catch each leak.
+- Found and fixed with it (`tests/test_log_privacy.py`):
+  - The anonymiser logged every real name it replaced, at WARNING and
+    INFO, so the live bot has been writing them to `docker logs` on the Pi.
+  - The engine logged each row's description at INFO.
+  - `ClaudeCategorizer` logged a per-row summary at INFO.
+  - Messages now carry categories, confidences and counts only.
+  - **Open (user):** the existing `docker logs` history on the Pi still
+    holds those names until the container is recreated at Phase 4.
 - Later, in its own session: a local model or Jev, scored with the same
   script (`/home/wsl/Coding/jev-investigation.md`).
 
