@@ -39,24 +39,32 @@ class ChunkProvider:
     """Answers a batch prompt for exactly the T-ids it contains.
 
     delay(first_tid_number) sets how long a chunk takes; fail(first) makes
-    a chunk raise. Records the peak number of calls in flight and which
-    chunks were cancelled.
+    a chunk raise on every call, fail_times={first: n} on its first n calls.
+    Records the peak number of calls in flight, which chunks were
+    cancelled, and each chunk's call times.
     """
 
-    def __init__(self, delay=lambda first: 0.0, fail=lambda first: False):
+    def __init__(self, delay=lambda first: 0.0, fail=lambda first: False,
+                 fail_times=None):
         self.delay, self.fail = delay, fail
+        self.fail_times = dict(fail_times or {})
         self.in_flight = self.peak = self.calls = 0
         self.cancelled = []
+        self.started = {}
 
     async def complete(self, prompt, max_tokens=0, temperature=0.0):
         ids = T_ID.findall(prompt)
         first = int(ids[0][1:])
         self.calls += 1
+        self.started.setdefault(first, []).append(time.monotonic())
         self.in_flight += 1
         self.peak = max(self.peak, self.in_flight)
         try:
             await asyncio.sleep(self.delay(first))
             if self.fail(first):
+                raise RuntimeError("chunk failed")
+            if self.fail_times.get(first, 0) > 0:
+                self.fail_times[first] -= 1
                 raise RuntimeError("chunk failed")
             return json.dumps({"transactions": [
                 {"id": tid, "category": f"cat-{tid}", "description": f"d {tid}",
@@ -68,9 +76,10 @@ class ChunkProvider:
             self.in_flight -= 1
 
 
-def categorizer(provider):
+def categorizer(provider, retry_delay=0.0):
     cat = ClaudeCategorizer.__new__(ClaudeCategorizer)
     cat.provider, cat.model = provider, "sonnet"
+    cat.chunk_retry_delay = retry_delay
     return cat
 
 
@@ -141,6 +150,40 @@ async def test_deadline_cancels_the_unfinished_chunks():
     assert got[40:] == [None] * 60
     assert sorted(provider.cancelled) == [41, 81]
     assert provider.in_flight == 0
+
+
+async def test_a_chunk_that_fails_once_is_retried_and_answered():
+    provider = ChunkProvider(fail_times={41: 1})
+    results = await run_batch(categorizer(provider), unmatched_rows(100),
+                              max_parallel=3)
+    assert categories(results) == [f"cat-T{i}" for i in range(1, 101)]
+    assert provider.calls == 4
+    assert len(provider.started[41]) == 2
+
+
+async def test_a_chunk_is_retried_only_once():
+    provider = ChunkProvider(fail_times={41: 2})
+    results = await run_batch(categorizer(provider), unmatched_rows(100),
+                              max_parallel=3)
+    assert categories(results)[40:80] == [None] * 40
+    assert len(provider.started[41]) == 2
+
+
+async def test_the_retry_waits_the_backoff():
+    provider = ChunkProvider(fail_times={1: 1})
+    await run_batch(categorizer(provider, retry_delay=0.2), unmatched_rows(5))
+    first, second = provider.started[1]
+    assert second - first >= 0.2
+
+
+async def test_the_deadline_cancels_a_chunk_waiting_to_retry():
+    provider = ChunkProvider(fail_times={1: 1})
+    started = time.monotonic()
+    results = await run_batch(categorizer(provider, retry_delay=30.0),
+                              unmatched_rows(5), deadline=started + 0.2)
+    assert time.monotonic() - started < 5
+    assert results == [None] * 5
+    assert len(provider.started[1]) == 1
 
 
 async def test_hung_chunk_times_out_without_a_deadline():

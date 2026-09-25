@@ -23,13 +23,17 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Seconds one chunk may run: the batch call plus a repair call, each bounded
-# by ClaudeProvider.cli_timeout (180 s), with room for the kills.
-CHUNK_TIMEOUT = 420
+# Seconds one chunk may run: the batch call, its one retry and a repair
+# call, each bounded by ClaudeProvider.cli_timeout (180 s), plus the retry
+# backoff and room for the kills.
+CHUNK_TIMEOUT = 600
 
 
 class ClaudeCategorizer:
     """Categorizes transactions using Claude API with confidence scoring."""
+
+    # Seconds before a failed chunk's one retry.
+    chunk_retry_delay = 15
 
     def __init__(self, api_key: Optional[str] = None, model: str = "sonnet"):
         """
@@ -408,8 +412,7 @@ Respond ONLY with the JSON object, nothing else. Remember: description must be i
         )
 
         try:
-            response_text = await self.provider.complete(
-                prompt=prompt, max_tokens=8192, temperature=0.3)
+            response_text = await self._complete_chunk(prompt)
 
             parsed, missing_ids = self._parse_batch_response(
                 response_text, chunk_ids,
@@ -482,6 +485,23 @@ Respond ONLY with the JSON object, nothing else. Remember: description must be i
         except Exception as e:
             logger.error(f"Batch categorization chunk failed: {e}", exc_info=True)
             # Leave None entries for this chunk — caller handles fallback
+
+    async def _complete_chunk(self, prompt: str) -> str:
+        """One batch call, retried once after chunk_retry_delay seconds.
+
+        A failed chunk otherwise costs all its rows but the per-row
+        fallback's few; a second failure goes to the caller.
+        """
+        try:
+            return await self.provider.complete(
+                prompt=prompt, max_tokens=8192, temperature=0.3)
+        except Exception as e:
+            logger.warning(
+                f"AI chunk call failed ({type(e).__name__}); retrying once "
+                f"in {self.chunk_retry_delay:.0f}s")
+        await asyncio.sleep(self.chunk_retry_delay)
+        return await self.provider.complete(
+            prompt=prompt, max_tokens=8192, temperature=0.3)
 
     def _build_chunks(self, anon_txs, orig_txs, ids, chunk_size):
         """Split transactions into chunks, avoiding splitting same counterparty."""

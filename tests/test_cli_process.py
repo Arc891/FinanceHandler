@@ -132,3 +132,69 @@ async def test_large_output_is_read_in_full(fake_claude):
     text = await asyncio.wait_for(provider(timeout=10).complete("prompt"),
                                   timeout=15)
     assert text == big
+
+
+# ── A failed call says why ──────────────────────────────────────────────────
+
+def fails_with(stdout="", stderr="", code=1):
+    body = ""
+    if stdout:
+        body += f"cat <<'OUT'\n{stdout}\nOUT\n"
+    if stderr:
+        body += f"cat >&2 <<'ERR'\n{stderr}\nERR\n"
+    return body + f"exit {code}\n"
+
+
+async def failure(fake_claude, **kwargs):
+    install, _ = fake_claude
+    install(fails_with(**kwargs))
+    with pytest.raises(RuntimeError) as info:
+        await asyncio.wait_for(provider(timeout=10).complete("prompt"),
+                               timeout=15)
+    return str(info.value)
+
+
+async def test_nonzero_exit_reports_the_json_error_fields(fake_claude):
+    """Empty stderr used to give only 'Unknown error'."""
+    msg = await failure(fake_claude, stdout=(
+        '{"type":"result","subtype":"error_max_turns","is_error":true,'
+        '"terminal_reason":"max_turns"}'))
+    assert "exit 1" in msg
+    assert "subtype=error_max_turns" in msg
+    assert "terminal_reason=max_turns" in msg
+    assert "Unknown error" not in msg
+
+
+async def test_nonzero_exit_reads_the_result_object_of_array_output(fake_claude):
+    msg = await failure(fake_claude, code=2, stdout=(
+        '[{"type":"system","subtype":"init"},'
+        '{"type":"result","subtype":"error_during_execution","is_error":true,'
+        '"result":"API Error: 529 Overloaded"}]'))
+    assert "exit 2" in msg
+    assert "subtype=error_during_execution" in msg
+    assert "API Error: 529 Overloaded" in msg
+
+
+async def test_error_result_text_is_truncated(fake_claude):
+    msg = await failure(fake_claude, stdout=(
+        '{"type":"result","is_error":true,"result":"' + "e" * 5000 + '"}'))
+    assert "e" * 200 in msg
+    assert "e" * 201 not in msg
+
+
+async def test_non_json_stdout_is_described_by_size_only(fake_claude):
+    """Whatever the CLI printed (it could echo the prompt) stays out."""
+    msg = await failure(fake_claude, stdout="| T1 | Jolanda Vermeulen | -47.35")
+    assert "not JSON" in msg
+    assert "Jolanda" not in msg and "47.35" not in msg
+
+
+async def test_stderr_is_still_reported_and_truncated(fake_claude):
+    msg = await failure(fake_claude, stderr="boom " + "s" * 5000)
+    assert "boom" in msg
+    assert "s" * 201 not in msg
+
+
+async def test_no_output_at_all_says_so(fake_claude):
+    msg = await failure(fake_claude, code=3)
+    assert "exit 3" in msg and "no output" in msg

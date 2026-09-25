@@ -2188,6 +2188,29 @@ measures them on months where the right answer is already known.
     first: surface the CLI's JSON error fields from stdout on a non-zero
     exit, and retry a failed chunk once before the per-row fallback.
     Count the error types (never their text) over a long run.
+  - Done 2026-09-25 (me), both steps, 467 tests green:
+    - A non-zero exit now raises `Claude Code CLI failed: exit N;
+      subtype=...; terminal_reason=...; result: ...; stderr: ...`. The
+      result text appears only when `is_error` is set, and it and stderr
+      are cut to 200 characters. Stdout that is not JSON is reported by
+      size only, since it could echo the prompt. A suspect to check
+      against the real error (low-to-moderate confidence): with
+      `--max-turns 1` and the CLI's tools enabled, a model that tries a
+      tool ends as `error_max_turns`, which exits 1 with empty stderr,
+      exactly the old "Unknown error".
+    - `_categorize_chunk` retries a failed batch call once, after
+      `chunk_retry_delay` (15 s). A second failure goes to the per-row
+      fallback as before. `CHUNK_TIMEOUT` rises to 600 s to fit three
+      180 s calls (batch, retry, repair) plus the backoff; the run
+      deadline still cancels a chunk waiting to retry.
+    - `eval_categoriser.py` prints a `log kinds` block: counts per logger,
+      level and fixed labels (exception class, `exit N`, enum-shaped
+      `subtype=` / `terminal_reason=` tokens, `API NNN`, and a phrase
+      table such as `timed out`, `overloaded`, `usage limit`, `retry`).
+      No message text is printed.
+    - Next: rerun the eval (Sonnet once, Haiku twice) with this code,
+      read the log kinds, then decide `AI_MAX_PARALLEL_CHUNKS` and the
+      model.
 - Later, in its own session: a local model or Jev, scored with the same
   script (`/home/wsl/Coding/jev-investigation.md`).
 

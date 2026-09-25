@@ -41,6 +41,8 @@ class ClaudeProvider:
     # seconds to wait for the process to be reaped after it is killed.
     cli_timeout = 180
     kill_grace = 10
+    # Characters of CLI error text carried into an exception message.
+    error_text_limit = 200
 
     def __init__(self, api_key: Optional[str] = None, model: str = "haiku"):
         """
@@ -124,8 +126,17 @@ class ClaudeProvider:
         Raises:
             RuntimeError: if the CLI reported an error or no result is present.
         """
-        parsed = json.loads(stdout_str)
+        result_obj = ClaudeProvider._result_object(json.loads(stdout_str))
 
+        if result_obj.get("is_error"):
+            raise RuntimeError(
+                f"Claude Code error: {result_obj.get('result')}")
+
+        return result_obj.get("result", ""), result_obj.get("total_cost_usd", 0)
+
+    @staticmethod
+    def _result_object(parsed) -> dict:
+        """The result object of parsed `--output-format json` output."""
         if isinstance(parsed, list):
             # Find the result object; fall back to the last dict in the stream.
             result_obj = next(
@@ -144,12 +155,34 @@ class ClaudeProvider:
         else:
             raise RuntimeError(
                 f"Unexpected Claude Code CLI output type: {type(parsed).__name__}")
+        return result_obj
 
-        if result_obj.get("is_error"):
-            raise RuntimeError(
-                f"Claude Code error: {result_obj.get('result')}")
+    @classmethod
+    def _describe_failure(cls, returncode, stdout_str, stderr_str) -> str:
+        """Why a CLI call exited non-zero, from its JSON result and stderr.
 
-        return result_obj.get("result", ""), result_obj.get("total_cost_usd", 0)
+        Reports the result's subtype and terminal_reason, and its text only
+        when it is an error message. Stdout that is not JSON is described by
+        size alone: it could hold anything, the prompt included.
+        """
+        limit = cls.error_text_limit
+        parts = [f"exit {returncode}"]
+        if stdout_str.strip():
+            try:
+                result_obj = cls._result_object(json.loads(stdout_str))
+            except (json.JSONDecodeError, RuntimeError):
+                parts.append(f"stdout not JSON ({len(stdout_str)} bytes)")
+            else:
+                for field in ("subtype", "terminal_reason"):
+                    if result_obj.get(field):
+                        parts.append(f"{field}={result_obj[field]}")
+                if result_obj.get("is_error") and result_obj.get("result"):
+                    parts.append(f"result: {str(result_obj['result'])[:limit]}")
+        if stderr_str.strip():
+            parts.append(f"stderr: {stderr_str.strip()[:limit]}")
+        if len(parts) == 1:
+            parts.append("no output")
+        return "; ".join(parts)
 
     async def _complete_cli(self, prompt: str, **kwargs) -> str:
         """
@@ -216,7 +249,8 @@ class ClaudeProvider:
                 stderr_str = err.read().decode('utf-8', errors='replace')
 
             if process.returncode != 0:
-                error_msg = stderr_str or "Unknown error"
+                error_msg = self._describe_failure(
+                    process.returncode, stdout_str, stderr_str)
                 logger.error(f"Claude Code CLI error: {error_msg}")
                 raise RuntimeError(f"Claude Code CLI failed: {error_msg}")
 
