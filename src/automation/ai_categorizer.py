@@ -13,7 +13,7 @@ import json
 import logging
 import time
 from typing import Dict, Any, Optional, Tuple
-from automation.data_anonymizer import anonymize_for_ai, get_anonymized_summary
+from automation.data_anonymizer import anonymize_for_ai
 from automation.claude_provider import ClaudeProvider
 
 # Configure logging with color
@@ -110,9 +110,6 @@ class ClaudeCategorizer:
         available_categories = income_categories if is_income else expense_categories
         transaction_type = "income" if is_income else "expense"
 
-        # Log using safe anonymized summary
-        safe_summary = get_anonymized_summary(anonymized_tx)
-        logger.info(f"Categorizing (anonymized): {safe_summary}")
 
         # Build the prompt with ANONYMIZED data
         prompt = self._build_prompt(
@@ -132,7 +129,7 @@ class ClaudeCategorizer:
                 temperature=0.3  # Lower temperature for more consistent categorization
             )
 
-            logger.debug(f"Claude response: {response_text}")
+            logger.debug(f"Claude response: {len(response_text)} chars")
 
             # Extract JSON from response
             result = self._parse_response(response_text)
@@ -306,7 +303,7 @@ Respond ONLY with the JSON object, nothing else. Remember: description must be i
 
         except json.JSONDecodeError as e:
             logger.error(f"Failed to parse JSON response: {e}")
-            logger.debug(f"Response text: {response_text}")
+            logger.debug(f"Response text: {len(response_text)} chars")
             return None
 
     async def categorize_batch(

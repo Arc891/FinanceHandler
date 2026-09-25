@@ -136,16 +136,12 @@ class TransactionAnonymizer:
             'booking_date': transaction.get('booking_date', '')
         }
 
-        # Log what was anonymized (for transparency)
+        # Log that something was anonymized, never what: these logs end up in
+        # `docker logs` on the Pi.
         if counterparty_raw != counterparty_clean:
-            logger.info(
-                f"Anonymized counterparty: '{counterparty_raw}' → '{counterparty_clean}'"
-            )
+            logger.debug("Anonymized a counterparty")
         if remittance_text != remittance_clean:
-            logger.debug(
-                f"Anonymized remittance: '{remittance_text[:50]}...' → "
-                f"'{remittance_clean[:50]}...'"
-            )
+            logger.debug("Anonymized remittance text")
 
         return anonymized
 
@@ -266,7 +262,7 @@ class TransactionAnonymizer:
             # Check if it looks like "FirstName LastName" pattern
             capitalized_words = [w for w in words if w and w[0].isupper()]
             if len(capitalized_words) >= 2:
-                logger.warning(f"Anonymizing personal name: {name}")
+                logger.debug("Anonymizing a personal name")
                 return "Private Person"
 
         # Single word names or unclear - check if business-like
@@ -275,7 +271,7 @@ class TransactionAnonymizer:
             return name
 
         # Default: anonymize to be safe
-        logger.warning(f"Anonymizing unclear counterparty: {name}")
+        logger.debug("Anonymizing an unclear counterparty")
         return "Private Person"
 
     def _anonymize_text(self, text: str) -> str:

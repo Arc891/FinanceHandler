@@ -106,7 +106,7 @@ class CategorizationEngine:
             transaction)
 
         if regex_category:
-            logger.info(f"Regex match: {regex_category} - {regex_description}")
+            logger.debug(f"Regex match: {regex_category}")
             return CategorizationResult(
                 category=regex_category,
                 description=regex_description,
@@ -199,15 +199,11 @@ class CategorizationEngine:
             # Determine if AI is confident enough for auto-approval
             method = self._decide_method(confidence, description)
             if method == 'ai_auto':
-                logger.info(
-                    f"AI auto-approved: {category} - {description} "
-                    f"(confidence: {confidence:.2f})"
-                )
+                logger.debug(
+                    f"AI auto-approved: {category} (confidence: {confidence:.2f})")
             else:
-                logger.info(
-                    f"AI needs manual review: {category} - {description} "
-                    f"(confidence: {confidence:.2f})"
-                )
+                logger.debug(
+                    f"AI below threshold: {category} (confidence: {confidence:.2f})")
 
             return CategorizationResult(
                 category=category,
