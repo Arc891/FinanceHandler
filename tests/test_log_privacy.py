@@ -93,3 +93,18 @@ async def test_claude_categorizer_per_row_path_logs_no_row_content(caplog):
         raw(expense_tx(name=NAME, amount=AMOUNT, rem=REMITTANCE)),
         expense, income, {})
     assert leaked(caplog) == []
+
+
+async def test_the_upload_pipeline_logs_no_row_content(caplog, tmp_path):
+    from fakes import FakeHttpError
+    from pipeline_env import Env, row
+
+    env = Env(tmp_path)
+    env.sheet("06/2026").transactions.update_faults = [("before", FakeHttpError(503))]
+    rows = [row("10-06-2026", counterparty=NAME, amount=AMOUNT, remittance=REMITTANCE),
+            row("11-06-2026", counterparty=SINGLE, amount=AMOUNT, remittance=f"FLAG {REMITTANCE}"),
+            row("2026/06/12", counterparty=NAME, amount=AMOUNT, remittance=REMITTANCE)]
+    upload_id, _ = await env.upload(rows)            # write fails: the period stays appending
+    await env.pipeline().resume(upload_id)
+    assert env.written("06/2026") == 2
+    assert leaked(caplog) == []

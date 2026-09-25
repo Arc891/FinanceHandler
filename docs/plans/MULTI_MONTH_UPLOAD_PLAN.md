@@ -1952,6 +1952,65 @@ on the Pi and set `AI_RUN_MAX_MINUTES` from it.
     it, so the budget can overrun by one per-row call (tens of seconds).
   - **Open (user):** re-time on the Pi with `--chunks 2`, once
     `--parallel 1` and once `--parallel 3`, and record both figures here.
+- Done 2026-09-25 (me), step 3, 449 tests green:
+  - `export.py` is now `Pipeline` with `process_upload`, `resume`,
+    `cancel`, `sort` and `status`. It has no Discord import. Progress is
+    an async callable that takes one line; a refusal raises `RunRefused`
+    with the message to show. Step 4 wires both to the commands.
+  - `run_state.RunStore` writes `data/runs/<upload_id>.json` atomically
+    after every status transition.
+  - Tests: `tests/test_process_upload.py`, `tests/test_reconcile.py` and a
+    pipeline case in `tests/test_log_privacy.py`, on the harness
+    `tests/pipeline_env.py`. The harness has a `Crash` (a
+    `BaseException`), so a test can kill the run at an exact point of
+    COMMIT and resume it with a fresh pipeline.
+  - Mutation pass: 20 mutations of the pipeline, each caught by at least
+    one test. They cover the reconcile partition, the tail cut, both
+    audit rules, re-appending, record order, the flip order, the sort
+    skip, the budget modes, re-categorising, re-splitting, the three
+    guards, the anchor save, upload cleanup and the auth stop.
+
+  Decisions taken where the plan left room or contradicted itself:
+  - **`"stop"` leaves un-started periods at their current status (`split`),
+    not `categorised`.** 4.7 and section 5 both say `categorised`. But
+    `/resume` never re-categorises a `categorised` period, so it would
+    write those rows with no category. That is the defect 4.7 names for
+    the tripping period. The period records `categorised` as its own flag,
+    because the status alone cannot say it once a categorised period fails
+    at resolution on a resume.
+  - Google calls run in a worker thread (`asyncio.to_thread`). Their
+    retries sleep up to 45 s, which would otherwise stall the Discord
+    heartbeat and the parallel AI chunks.
+  - COMMIT plans both baselines and persists them with `appending` in one
+    write. It then calls `record_written` once for the whole period, and
+    commits and audits per block. It stops at the first block that fails.
+    If `plan_append` fails, nothing has been written, so the period is
+    marked `failed` and does not enter `appending`.
+  - `/resume` also refuses while another run has an `appending` period,
+    for the same reason `/upload` does.
+  - A reconcile opens the sheet with `lookup` and checks that the id is
+    the one the run wrote to. If it differs, the period stays `appending`
+    with `last_error`.
+  - The skip report gives the total strong skips, then one line per label
+    for weak skips ("probably already in `04/2026`"). A skipped row's own
+    label is never computed: that would mean splitting rows that are
+    already in a sheet, and a very old one could abort the split.
+  - `csv_helper` gives each row a `csv_row` (its line number), so a
+    dropped row can be reported by file and row.
+  - `ledger.start_run` is called after the split and before anything is
+    written. The advanced anchor is kept in the run state
+    (`anchor_after`) and saved only if the anchor file still holds
+    `anchor_before`, so a crash between the two is repaired on `/resume`.
+  - A refused split closes the run as `refused` and deletes its uploads.
+    `/cancel` deletes them too, since nothing is owed any more.
+  - New config keys: `AI_BUDGET_TRIP_ACTION` (validated) and
+    `SUMMARY_FLAGGED_LINES`, beside `AI_RUN_MAX_MINUTES`.
+  - **Open for Phase 4 step 1:** `commit_append` still records a failed
+    write in `failed_uploads.json`, as its tests require. Those rows are
+    also held by the run, which `/resume` reconciles. If
+    `retry_failed_transactions.py` re-appends them as well, they are
+    written twice. The rewritten script must skip every entry whose
+    `upload_id` belongs to a run that is still open.
 
 **Evaluation, categoriser quality** (added 2026-09-25; after Phase 3, before
 Phase 4). Phase 4 step 5 writes the whole backlog in one go, and

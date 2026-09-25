@@ -113,6 +113,9 @@ CLAUDE_MODEL = "claude-3-5-haiku-20241022"
 AI_CONFIDENCE_THRESHOLD = 0.75  # below this an AI result is written flagged; set by the evaluation step
 AI_PER_TX_FALLBACK_LIMIT = 10   # per-row AI calls per period when a batch chunk fails
 AI_MAX_PARALLEL_CHUNKS = 3      # batch chunks in flight at once (one claude process each)
+AI_RUN_MAX_MINUTES = 30         # AI budget for one /upload or /resume (plan 4.7)
+AI_BUDGET_TRIP_ACTION = "write_flagged"  # or "stop": later periods wait for /resume
+SUMMARY_FLAGGED_LINES = 40      # flagged rows listed in the summary; the rest go in an attachment
 AI_CATEGORIZATION_ENABLED = False  # Enable after Session 2
 
 # Automation Schedule
@@ -193,6 +196,9 @@ __all__ = [
     "AI_CONFIDENCE_THRESHOLD",
     "AI_PER_TX_FALLBACK_LIMIT",
     "AI_MAX_PARALLEL_CHUNKS",
+    "AI_RUN_MAX_MINUTES",
+    "AI_BUDGET_TRIP_ACTION",
+    "SUMMARY_FLAGGED_LINES",
     "AI_CATEGORIZATION_ENABLED",
     "AUTO_DOWNLOAD_ENABLED",
     "AUTO_DOWNLOAD_TIME",

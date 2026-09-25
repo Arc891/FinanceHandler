@@ -52,6 +52,8 @@ def load_transactions_from_csv(csv_path: str) -> List[Dict[str, Any]]:
       - remittance_raw: column 17 exactly as the bank wrote it, before
         normalisation; the ledger's strong key uses it, so adding a spaarpot
         mapping later never changes the key of a recorded transaction
+      - csv_row: the 1-based line in the file, so a row the pipeline has to
+        drop (an unparsable date) can be reported by file and row
 
     Any rows with missing/empty booking_date are skipped. The file itself is
     never modified; a normalised copy is written beside it.
@@ -62,7 +64,7 @@ def load_transactions_from_csv(csv_path: str) -> List[Dict[str, Any]]:
     _write_rows(normalised_path(csv_path), normalized_rows)
 
     txs: List[Dict[str, Any]] = []
-    for raw_row, row in zip(raw_rows, normalized_rows):
+    for line, (raw_row, row) in enumerate(zip(raw_rows, normalized_rows), start=1):
         # Skip empty lines or malformed rows
         if not row or len(row) < 18 or not row[0].strip():
             continue
@@ -112,6 +114,7 @@ def load_transactions_from_csv(csv_path: str) -> List[Dict[str, Any]]:
             "remittance_information": rem_list,
             "bank_sequence_no": bank_sequence_no,
             "remittance_raw": raw_row[17].strip(),
+            "csv_row": line,
         }
         txs.append(tx)
 
