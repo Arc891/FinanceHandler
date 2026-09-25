@@ -1762,10 +1762,22 @@ sort, undo, delete.
     would touch, and has `--dry-run`.
   - The normalised copy is `<name>.normalised.csv` beside the upload, so the
     Phase 3 pipeline must iterate the run's `files` list, never glob `*.csv`.
-  - Open: `USER_ENTERED` also parses descriptions, so one that looks like a
-    date or number would be stored as one and fail its `RowTuple` match on
-    reconciliation. `sandbox_check.py` probes it with `"2-3"`.
-- Next: the user runs `scripts/google_login.py`, then `sandbox_check.py`.
+  - `USER_ENTERED` also parses descriptions: the first live run stored the
+    probe description `"2-3"` as a date serial, so undo could not find it.
+    `commit_append` now sends description and category with a leading
+    apostrophe (consumed by Sheets, not stored); `RowTuple`s are computed
+    from the unprefixed text.
+- Done 2026-09-25, live sandbox (`scripts/sandbox_check.py`, synthetic month
+  `12/2099`, created and deleted twice): **plan A holds.** Create from the
+  template and the full fidelity check pass, including the behavioural totals
+  check; `drive.file` **can** move the new file into `Financiën`; the
+  `RowTuple` round-trip holds under `nl_NL`; the sort keeps amounts identical
+  and dates rendering as dates; undo from the audit empties both blocks.
+  Cosmetic, unexplained: after the sort the amount in `C5` rendered `12`
+  where rows below rendered `€…`, so that cell's number format differs.
+  Values are unaffected; check the template's `C5`/`H5` format before
+  Phase 4.
+- Token created on the workstation (`data/google/authorized_user.json`); copied to the Pi only at Phase 4 step 3. **Phase 1 is complete.**
 
 **Phase 2, periods**: `periods.py`, config keys, tests, fixture-driven;
 confirm the backlog walk of 4.3 against the fixture; time one 40-row AI chunk
