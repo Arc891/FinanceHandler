@@ -1,5 +1,7 @@
 import csv
+import copy
 import logging
+import os
 from typing import Dict, List, Any
 from config.spaarpot_uuid_map import SPAARPOT_UUID_MAP
 
@@ -47,66 +49,71 @@ def load_transactions_from_csv(csv_path: str) -> List[Dict[str, Any]]:
       - creditor: { name: counterparty_name } if income,  else {}
       - remittance_information: [ remittance ] or []
       - bank_sequence_no: column 15 as a string, '' when absent
+      - remittance_raw: column 17 exactly as the bank wrote it, before
+        normalisation; the ledger's strong key uses it, so adding a spaarpot
+        mapping later never changes the key of a recorded transaction
 
-    Any rows with missing/empty booking_date are skipped.
+    Any rows with missing/empty booking_date are skipped. The file itself is
+    never modified; a normalised copy is written beside it.
     """
 
-    normalize_csv_data(csv_path)
+    raw_rows = _read_rows(csv_path)
+    normalized_rows = normalize_rows(raw_rows)
+    _write_rows(normalised_path(csv_path), normalized_rows)
 
     txs: List[Dict[str, Any]] = []
-    with open(csv_path, newline='', encoding='utf-8') as csvfile:
-        reader = csv.reader(csvfile)
-        for row in reader:
-            # Skip empty lines or malformed rows
-            if not row or len(row) < 18 or not row[0].strip():
-                continue
+    for raw_row, row in zip(raw_rows, normalized_rows):
+        # Skip empty lines or malformed rows
+        if not row or len(row) < 18 or not row[0].strip():
+            continue
 
-            # 1) Extract fields by index
-            booking_date = row[0].strip()
-            counterparty_name = row[3].strip() if len(row) > 3 else ""
-            currency = row[9].strip() if len(row) > 9 else ""
-            amt_str = row[10].strip() if len(row) > 10 else "0"
-            # Normalize decimal comma (if any) to dot
-            amt_str = amt_str.replace(',', '.')
-            try:
-                amt = float(amt_str)
-            except ValueError:
-                amt = 0.0
+        # 1) Extract fields by index
+        booking_date = row[0].strip()
+        counterparty_name = row[3].strip() if len(row) > 3 else ""
+        currency = row[9].strip() if len(row) > 9 else ""
+        amt_str = row[10].strip() if len(row) > 10 else "0"
+        # Normalize decimal comma (if any) to dot
+        amt_str = amt_str.replace(',', '.')
+        try:
+            amt = float(amt_str)
+        except ValueError:
+            amt = 0.0
 
-            code = row[13].strip() if len(row) > 13 else ""
-            sub_code = row[14].strip() if len(row) > 14 else ""
-            bank_desc = f"{code} {sub_code}".strip()
+        code = row[13].strip() if len(row) > 13 else ""
+        sub_code = row[14].strip() if len(row) > 14 else ""
+        bank_desc = f"{code} {sub_code}".strip()
 
-            rem = row[17].strip() if len(row) > 17 else ""
-            rem_list = [rem] if rem else []
-            bank_sequence_no = row[15].strip()
+        rem = row[17].strip() if len(row) > 17 else ""
+        rem_list = [rem] if rem else []
+        bank_sequence_no = row[15].strip()
 
-            # 2) Determine credit/debit and set debtor/creditor names
-            if amt < 0:
-                credit_debit = "DBIT"
-                debtor_name = counterparty_name
-                creditor_name = ""
-            else:
-                credit_debit = "CRDT"
-                creditor_name = counterparty_name
-                debtor_name = ""
+        # 2) Determine credit/debit and set debtor/creditor names
+        if amt < 0:
+            credit_debit = "DBIT"
+            debtor_name = counterparty_name
+            creditor_name = ""
+        else:
+            credit_debit = "CRDT"
+            creditor_name = counterparty_name
+            debtor_name = ""
 
-            tx = {
-                "booking_date": booking_date,
-                "transaction_amount": {
-                    "amount": f"{amt:.2f}",
-                    "currency": currency
-                },
-                "credit_debit_indicator": credit_debit,
-                "bank_transaction_code": {
-                    "description": bank_desc
-                },
-                "debtor": {"name": debtor_name},
-                "creditor": {"name": creditor_name},
-                "remittance_information": rem_list,
-                "bank_sequence_no": bank_sequence_no,
-            }
-            txs.append(tx)
+        tx = {
+            "booking_date": booking_date,
+            "transaction_amount": {
+                "amount": f"{amt:.2f}",
+                "currency": currency
+            },
+            "credit_debit_indicator": credit_debit,
+            "bank_transaction_code": {
+                "description": bank_desc
+            },
+            "debtor": {"name": debtor_name},
+            "creditor": {"name": creditor_name},
+            "remittance_information": rem_list,
+            "bank_sequence_no": bank_sequence_no,
+            "remittance_raw": raw_row[17].strip(),
+        }
+        txs.append(tx)
 
     return txs
 
@@ -115,16 +122,28 @@ def load_transactions_from_csv(csv_path: str) -> List[Dict[str, Any]]:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def normalize_csv_data(csv_path: str) -> None:
-    """
-    Reads a CSV file and normalizes specific fields to help with information extraction.
-    This is a placeholder function; actual normalization logic should be implemented as needed.
-    """
-
+def _read_rows(csv_path: str) -> List[List[str]]:
     with open(csv_path, newline='', encoding='utf-8') as csvfile:
-        reader = csv.reader(csvfile)
-        rows = [row for row in reader]
+        return [row for row in csv.reader(csvfile)]
 
+
+def _write_rows(path: str, rows: List[List[str]]) -> None:
+    with open(path, 'w', newline='', encoding='utf-8') as csvfile:
+        csv.writer(csvfile, quoting=csv.QUOTE_MINIMAL).writerows(rows)
+
+
+def normalised_path(csv_path: str) -> str:
+    """export.csv -> export.normalised.csv, beside the upload."""
+    stem, ext = os.path.splitext(os.fspath(csv_path))
+    return f"{stem}.normalised{ext or '.csv'}"
+
+
+def normalize_rows(rows: List[List[str]]) -> List[List[str]]:
+    """
+    Normalise specific fields to help with information extraction. Returns
+    new rows; the input is not modified.
+    """
+    rows = copy.deepcopy(rows)
     for row in rows:
         # Rows without a remittance column (blank lines, truncated rows) are
         # left untouched; load_transactions_from_csv skips them.
@@ -134,19 +153,22 @@ def normalize_csv_data(csv_path: str) -> None:
             if f"Referentie: {uuid}" in row[17]:
                 # Row contains a UUID reference, change it to the mapped name
                 name = SPAARPOT_UUID_MAP[uuid]
-                logger.info(f"Changing row {row} with {uuid} to {name}")
                 row[17] = row[17].replace(f"Referentie: {uuid}", f"- {name}")
-                logger.info(f"Updated row: {row}")
                 break
 
         if str(row).find("verzekeri ") != -1:
-            logger.info(
-                f"Changing row {row} with 'verzekeri' to 'verzekering'")
             row[17] = row[17].replace("verzekeri", "verzekering")
+    return rows
 
-    # Write the modified rows back to the CSV file
-    with open(csv_path, 'w', newline='', encoding='utf-8') as csvfile:
-        writer = csv.writer(csvfile, quoting=csv.QUOTE_MINIMAL)
-        writer.writerows(rows)
 
-    logger.info(f"CSV data normalized and saved to {csv_path}")
+def normalize_csv_data(csv_path: str) -> str:
+    """
+    Write a normalised copy of the export beside it and return its path.
+
+    The upload itself is never rewritten: the ledger keys transactions on the
+    bank's own remittance text (plan 4.6), and /resume re-reads retained uploads.
+    """
+    out = normalised_path(csv_path)
+    _write_rows(out, normalize_rows(_read_rows(csv_path)))
+    logger.info(f"Normalised copy of {csv_path} written to {out}")
+    return out

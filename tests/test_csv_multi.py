@@ -68,3 +68,40 @@ def test_existing_fields_unchanged(tmp_path):
     assert tx["credit_debit_indicator"] == "DBIT"
     assert tx["debtor"] == {"name": "Picnic"}
     assert tx["bank_transaction_code"] == {"description": "8810 IDB"}
+
+
+# ── the upload is never rewritten; the bank's own remittance is kept (plan 4.6) ──
+
+def test_load_leaves_the_original_bytes_intact(tmp_path):
+    path = write_csv(tmp_path / "export.csv", [
+        asn_row(remittance="Polis verzekeri nummer 1"), asn_row(seq="2")])
+    before = open(path, "rb").read()
+    load_transactions_from_csv(path)
+    assert open(path, "rb").read() == before
+
+
+def test_a_normalised_copy_is_written_beside_the_upload(tmp_path):
+    path = write_csv(tmp_path / "export.csv", [asn_row(remittance="Polis verzekeri nummer 1")])
+    copy = normalize_csv_data(path)
+    assert copy == str(tmp_path / "export.normalised.csv")
+    assert "verzekering" in open(copy, encoding="utf-8").read()
+
+
+def test_remittance_raw_is_the_pre_normalisation_text(tmp_path):
+    path = write_csv(tmp_path / "export.csv", [asn_row(remittance="Polis verzekeri nummer 1")])
+    tx = load_transactions_from_csv(path)[0]
+    assert tx["remittance_information"] == ["Polis verzekering nummer 1"]
+    assert tx["remittance_raw"] == "Polis verzekeri nummer 1"
+
+
+def test_strong_key_survives_a_new_spaarpot_mapping(tmp_path, monkeypatch):
+    from finance_core import csv_helper
+    from finance_core.ledger import strong_key
+    uuid = "0f0e0d0c-1111-2222-3333-444455556666"
+    path = write_csv(tmp_path / "export.csv", [asn_row(counterparty="", remittance=f"Spaarpot Referentie: {uuid}")])
+    monkeypatch.setattr(csv_helper, "SPAARPOT_UUID_MAP", {})
+    before = load_transactions_from_csv(path)[0]
+    monkeypatch.setattr(csv_helper, "SPAARPOT_UUID_MAP", {uuid: "Vakantie"})
+    after = load_transactions_from_csv(path)[0]
+    assert after["remittance_information"] != before["remittance_information"]
+    assert strong_key(after) == strong_key(before)
