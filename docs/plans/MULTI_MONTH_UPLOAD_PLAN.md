@@ -2041,6 +2041,28 @@ measures them on months where the right answer is already known.
   - Messages now carry categories, confidences and counts only.
   - **Open (user):** the existing `docker logs` history on the Pi still
     holds those names until the container is recreated at Phase 4.
+- Dry run on the Pi, 2026-09-25 (user):
+  - Every 2024/2025 sheet has the current layout (data from row 5). 19
+    months were found, 06/2024 to 12/2025.
+  - Of 2,192 export rows, 1,692 matched and scored before mapping. Also
+    171 rows not found in a sheet, 34 in the other block, 21 undecided and
+    274 under old category names; 98 sheet rows matched no export row.
+  - After two HTTP 429s the script batches both blocks into one read and
+    paces calls 1.2 s apart.
+- Category mapping for the scored runs (user, 2026-09-25):
+  - `Abbonementen` -> `Abonnementen`.
+  - `Vervoer / auto`, `OV`, `Auto / vervoer` and `Vervoer` ->
+    `Auto / vervoer / OV`.
+  - `Gas/water/licht` -> `Gas/water/electra`.
+  - `Naar Spaarpotjes` -> `Naar spaarpotjes`.
+  - `Uitjes` -> `Dates/uitjes`.
+  - `Schoonmaken en was` and `Huis` -> `Huishouden`.
+  - `Eten & drinken` -> `Boodschappen`.
+  - `Gezondheid/medisch` -> `Persoonlijke verzorging`.
+  - `Huwelijksreis` and `Bruiloft` are one-off wedding categories from
+    May 2024, when the joint account was set up. They are left unscored.
+  - The runner is `/tmp/eval/run.sh` on the Pi: Sonnet twice, then Haiku
+    twice.
 - Later, in its own session: a local model or Jev, scored with the same
   script (`/home/wsl/Coding/jev-investigation.md`).
 
