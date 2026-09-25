@@ -27,30 +27,17 @@ import argparse
 import json
 import os
 import sys
-import tempfile
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(PROJECT_ROOT, "src"))
 
 from finance_core.config_access import project_path, setting  # noqa: E402
 from finance_core.ledger import Ledger  # noqa: E402
+from finance_core.period_state import write_state  # noqa: E402
 from finance_core.row_tuple import BLOCKS_BY_NAME  # noqa: E402
 from finance_core.run_state import appending_sheet_ids  # noqa: E402
 from finance_core.sheet_index import load_index, save_index  # noqa: E402
 from finance_core.sheet_writer import remove_rows  # noqa: E402
-
-
-def _restore_period_state(path, anchor_before) -> None:
-    if anchor_before is None:
-        if os.path.exists(path):
-            os.unlink(path)
-        return
-    directory = os.path.dirname(os.path.abspath(path))
-    os.makedirs(directory, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=directory, prefix=".period_state.", suffix=".tmp")
-    with os.fdopen(fd, "w", encoding="utf-8") as fh:
-        json.dump(anchor_before, fh, indent=2, ensure_ascii=False)
-    os.replace(tmp, path)
 
 
 def main(argv=None, *, workbooks=None, stdout_write=sys.stdout.write) -> int:
@@ -123,7 +110,7 @@ def main(argv=None, *, workbooks=None, stdout_write=sys.stdout.write) -> int:
     if args.dry_run:
         say(f"would restore the period state to: {json.dumps(anchor)}")
         return 0
-    _restore_period_state(args.period_state, anchor)
+    write_state(args.period_state, anchor)
     say(f"period state restored to: {json.dumps(anchor)}")
     ledger.forget_run(args.upload_id)
     say(f"run {args.upload_id} undone; its rows count as new on the next upload")

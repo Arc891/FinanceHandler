@@ -74,6 +74,15 @@ UPLOAD_LEDGER_PATH = "data/upload_ledger.json"
 PERIOD_STATE_PATH = "data/period_state.json"
 RUNS_DIR = "data/runs"
 
+# Financial months (plan 4.3). A month starts on the first DUO or Anamata
+# salary income of a new cycle; the constants come from measured 2026 spans.
+PERIOD_BOUNDARY_MARKERS = [r"\bDUO\b", r"Anamata"]   # case-sensitive, counterparty or remittance
+PERIOD_BOUNDARY_MIN_AMOUNT = 250.0              # below the smallest DUO payment
+PERIOD_MIN_DAYS = 20                            # boundary-to-boundary is 27-32 days
+PERIOD_MAX_DAYS = 35                            # marker-less rows past this abort the upload
+PERIOD_STEP_DAYS = 29                           # fallback only, beyond the known history
+PERIOD_LABEL_SPLIT_DAY = 15                     # boundary on day 15+ names the next month
+
 # ─────────────────────────────────────────────────────────────────────────────
 # FILE STORAGE CONFIGURATION
 # ─────────────────────────────────────────────────────────────────────────────
