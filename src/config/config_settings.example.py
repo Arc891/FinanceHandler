@@ -57,6 +57,23 @@ GSHEET_TAB = "Blad1"
 GSHEET_EXPENSE_START_ROW = 2  # Row for first expense transaction
 GSHEET_INCOME_START_ROW = 2   # Row for first income transaction
 
+# Multi-month upload (docs/plans/MULTI_MONTH_UPLOAD_PLAN.md 4.10)
+# The bot runs on the user's own Google account via an OAuth token made once
+# with scripts/google_login.py. "service_account" exists only during Phases 1-3.
+GOOGLE_AUTH_MODE = "oauth"
+GOOGLE_OAUTH_CLIENT_PATH = "data/google/oauth_client.json"
+GOOGLE_OAUTH_TOKEN_PATH = "data/google/authorized_user.json"
+GSHEET_NAME_PATTERN = "Maandelijks Budget {label}"
+GSHEET_TEMPLATE_ID = "1OSi4W3B3PrfCTQyxt3OreLmqSs4nXY82Wlg1_eohTs8"
+GSHEET_FOLDER_ID = "1QoYs19vu04_DFIszlfWOJP7BoQLEtfaG"
+GSHEET_AUTO_CREATE = True
+GSHEET_CREATE_NONADJACENT = False               # only the month after the newest indexed one is created
+GSHEET_DATA_START_ROW = 5                       # replaces the two START_ROW keys in Phase 4
+SHEET_INDEX_PATH = "data/sheet_index.json"      # AUTHORITATIVE; back it up
+UPLOAD_LEDGER_PATH = "data/upload_ledger.json"
+PERIOD_STATE_PATH = "data/period_state.json"
+RUNS_DIR = "data/runs"
+
 # ─────────────────────────────────────────────────────────────────────────────
 # FILE STORAGE CONFIGURATION
 # ─────────────────────────────────────────────────────────────────────────────
