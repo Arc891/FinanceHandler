@@ -2122,6 +2122,42 @@ measures them on months where the right answer is already known.
     May 2024, when the joint account was set up. They are left unscored.
   - The runner is `/tmp/eval/run.sh` on the Pi: Sonnet twice, then Haiku
     twice.
+- Results, 2026-09-25 (Pi, `AI_MAX_PARALLEL_CHUNKS` 3, 1,918 rows scored):
+  - **Sonnet, two runs**, 37.9 and 37.3 min (67-176 s per month):
+    - Overall 61.5 % / 60.8 %; regex 91.7 %; AI 49.7 % / 48.1 %.
+    - **A third of the AI rows (330 / 335 of 990) got no answer**: the
+      chunk failed and the per-row fallback limit was spent. The log
+      counted 52 errors from `claude_provider` and 26 from
+      `ai_categorizer`; the messages are withheld.
+    - By confidence band: high 68 % / 67 % correct, medium 28 % / 30 %,
+      low 19 % / 24 %.
+    - The two runs disagree on 21.3 % of rows.
+  - Threshold table, run 1 ("rows needing you" = flagged plus wrong
+    unflagged): ≥ 0.9 → 734; ≥ 0.6 → 679; everything → 662. Lowering
+    to 0.6 saves about 55 rows over 19 months but writes about 140
+    more rows wrong and unflagged. **Recommendation: keep 0.75**, which
+    acts as 0.9. Pending the user's decision.
+  - **Haiku hung** in run 1 after 8 of 19 months (about 3.5 h idle, no
+    CPU, no child process). SIGINT showed it waiting in
+    `categorize_batch`'s `asyncio.wait(tasks, timeout=None)`
+    (`ai_categorizer.py:374`), with a subprocess pipe transport still
+    open. Diagnosis: `_complete_cli` waits on asyncio subprocess pipes.
+    In Python 3.12, `communicate()` and `process.wait()` return only
+    once every pipe transport has closed, so a pipe that never reaches
+    EOF blocks forever even though the child is dead. The 180 s timeout
+    cannot help, because its own `kill()` then `await process.wait()` is
+    unbounded. **The bot hangs the same way**, and the run deadline
+    cannot free it, because a cancel runs the same cleanup. Fix, test
+    first, before Phase 4:
+    - send the CLI's stdout and stderr to temporary files, not pipes;
+    - start `claude` with `start_new_session=True` and kill its process
+      group;
+    - bound the wait after a kill;
+    - give each chunk an outer timeout in `categorize_batch`.
+
+    Then rerun Haiku, and pick the model.
+  - The share of no-answer rows is the next diagnosis. The timing run on
+    the anonymised fixture prints the CLI's error lines.
 - Later, in its own session: a local model or Jev, scored with the same
   script (`/home/wsl/Coding/jev-investigation.md`).
 
