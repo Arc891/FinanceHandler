@@ -1673,6 +1673,8 @@ nothing from Phase 1 and can run in parallel with it.
   `data/sheet_index.json` seeded with the six 2026 ids of section 11;
   `.gitignore` gains `data/google/`, `data/runs/`, `data/*.json` and
   un-ignores `tests/fixtures/*.csv`. 91 tests green.
+- User steps below, written out click by click with a status checklist:
+  `docs/plans/PHASE0_USER_SETUP.md`.
 - User: review the `add_income_placeholder.py` dry-run output, then run it
   with `--apply` on the template and the six 2026 months. `06/2026` is
   included although it is empty: it was copied from the template before the
