@@ -145,6 +145,16 @@ def intended_cells(tx) -> list:
     return format_transaction_for_sheet(tx)
 
 
+def as_text(v):
+    """
+    Force a string cell to stay text under USER_ENTERED: a leading apostrophe
+    is consumed by Sheets and not stored. Without it a description such as
+    "2-3" is stored as a date serial (live sandbox, 2026-09-25) and its RowTuple
+    never matches again.
+    """
+    return f"'{v}" if isinstance(v, str) and v else v
+
+
 def ensure_capacity(worksheet, last_row: int) -> None:
     if last_row > worksheet.row_count:
         new_rows = last_row + CAPACITY_BUFFER
@@ -171,7 +181,8 @@ def commit_append(spreadsheet, block: Block, txs, *, context=None, failed_path=N
             first = read_block(spreadsheet, block, worksheet=ws).next_row
             last = first + len(cells) - 1
             ensure_capacity(ws, last)
-            ws.update(values=cells, range_name=block.a1(first, last),
+            payload = [[date_cell, amount, as_text(desc), as_text(cat)] for date_cell, amount, desc, cat in cells]
+            ws.update(values=payload, range_name=block.a1(first, last),
                       value_input_option=ValueInputOption.user_entered)
         except Exception as exc:
             _log_failure(spreadsheet, block, txs, exc, context or {}, failed_path)

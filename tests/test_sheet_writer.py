@@ -318,3 +318,15 @@ def test_compact_block_itself_carries_the_guard():
     sh = sheet()
     with pytest.raises(AppendingError):
         sheet_writer.compact_block(sh, EXPENSES, [], is_appending=lambda sid: True, previous_last_row=10)
+
+
+@pytest.mark.parametrize("text", ["24-06-2026", "12,50", "'quoted", "=SUM(A1)"])
+def test_descriptions_are_written_as_text_whatever_they_look_like(text):
+    # Live sandbox 2026-09-25: USER_ENTERED turned the description "2-3" into a date
+    # serial, so its RowTuple never matched again and undo left the row behind.
+    sh = sheet()
+    pairs = commit_append(sh, EXPENSES, [expense_tx(description=text, category=text)])
+    back = read_block(sh, EXPENSES).tuples[-1]
+    assert back[2:] == (text, text)
+    assert pairs[0][1] == back
+    assert remove_rows(sh, EXPENSES, [pairs[0][1]], is_appending=NOT_APPENDING) == (1, 0)
