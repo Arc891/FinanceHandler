@@ -831,8 +831,10 @@ is in a sheet. `data/upload_ledger.json` holds
   produces, and a later overlapping upload would write the row again. Semantics are **multiset**: per key and
   label, a count and a list of `{upload_id, written_row}`. Two identical
   coffees on one day are two occurrences. ASN column 15
-  (`bank_sequence_no`) joins the key **only if** the Phase 0 check shows it
-  stable across two exports of the same transaction; nothing depends on it.
+  (`bank_sequence_no`) **joins the strong key**: the Phase 0 check
+  (2026-09-25) found it identical across two exports of the same
+  transactions. The multiset semantics stay, so nothing breaks if a future
+  export ever leaves it empty.
 - a **weak** key `booking_date | abs(amount) | block` → count per label,
   filled for every strong record and by `scripts/seed_state.py` from the
   already populated sheets, which is the only way to recognise rows the old
@@ -1696,6 +1698,15 @@ nothing from Phase 1 and can run in parallel with it.
   both scopes granted). **Plan A holds; Phase 1 is unblocked.** Branding
   verification was attempted and failed on domain ownership and privacy
   policy content; it is not needed and was left open.
+- Done 2026-09-25 (user): column 15 compared across two overlapping
+  exports: **same**, so `bank_sequence_no` joins the strong key (4.6).
+  Fixture `tests/fixtures/multi_month.csv` made from a 12-06-2026 to
+  25-09-2026 export: 390 rows (36 income / 354 expense), boundary markers
+  on 24-06, 24-07, 24-08 and 24-09-2026, so four boundaries and five
+  periods (`06/2026` leading remainder, then `07/2026` to `10/2026`).
+  Reviewed by the user; an automated scan found no unfaked IBAN, email,
+  long number or balance, and all 390 sequence numbers unique.
+  **Phase 0 is complete.**
 - User: Google Cloud project `asnexport` → OAuth consent screen: External,
   scopes **`spreadsheets` and `drive.file` only** — if the console offers to
   add any other `drive.*` scope, decline it; they are restricted and cost a

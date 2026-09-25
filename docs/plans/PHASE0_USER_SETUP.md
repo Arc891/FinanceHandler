@@ -10,8 +10,8 @@ Status: tick each box as it is done.
 - [x] 1. Income placeholder applied to the sheets (2026-09-25)
 - [x] 2. OAuth client created and saved to `data/google/oauth_client.json` (2026-09-25)
 - [x] 3. Consent screen tested: "unverified" warning, both scopes granted (2026-09-25; **Phase 1 unblocked**)
-- [ ] 4. Bank sequence number compared across two exports: same / different
-- [ ] 5. Fixture `tests/fixtures/multi_month.csv` made, reviewed and committed (**gates Phase 2**)
+- [x] 4. Bank sequence number compared across two exports: same
+- [x] 5. Fixture `tests/fixtures/multi_month.csv` made, reviewed and committed (**gates Phase 2**)
 
 All commands run from the project root: `cd ~/Coding/FinanceAutomation`.
 
