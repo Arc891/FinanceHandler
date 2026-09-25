@@ -316,3 +316,42 @@ def test_a_failure_inside_main_withholds_its_message(monkeypatch, capsys,
     assert ev.main(["--dry-run", "x.csv"]) == 2
     out = capsys.readouterr()
     assert "RuntimeError" in out.out and SECRET_NAME not in out.out + out.err
+
+
+class RateLimited(Exception):
+    """Shaped like gspread's APIError: the status sits on .response."""
+
+    def __init__(self, status=429):
+        super().__init__(f"quota exceeded for {SECRET_NAME}")
+        self.response = SimpleNamespace(status_code=status)
+
+
+class FlakyWs(FakeWs):
+    def __init__(self, blocks, failures):
+        super().__init__(blocks)
+        self.failures = failures
+
+    def get(self, a1, value_render_option=None):
+        if self.failures:
+            self.failures -= 1
+            raise RateLimited()
+        return super().get(a1, value_render_option)
+
+
+def test_sheet_reads_retry_a_rate_limit():
+    ws = FlakyWs({"B1:E": [[45368, 1, "d", "Boodschappen"]], "G1:J": []}, 2)
+    gc = SimpleNamespace(open_by_key=lambda key: SimpleNamespace(
+        worksheet=lambda tab: ws, worksheets=lambda: [ws]))
+    slept = []
+    lines = []
+    rows = ev.read_sheets(gc, [("03/2024", "x")], "Transactions",
+                          lines.append, sleep=slept.append)
+    assert len(rows) == 1 and len(slept) == 2
+
+
+def test_a_google_error_prints_its_status_but_not_its_message(capsys):
+    def boom():
+        raise RateLimited(403)
+    assert ev.guarded(boom) == 2
+    out = capsys.readouterr().out
+    assert "RateLimited (HTTP 403)" in out and SECRET_NAME not in out

@@ -105,7 +105,9 @@ def guarded(fn, debug=False):
         if debug:
             raise
         frame = traceback.extract_tb(exc.__traceback__)[-1]
-        print(f"stopped: {type(exc).__name__} at {os.path.basename(frame.filename)}:{frame.lineno}"
+        status = getattr(getattr(exc, "response", None), "status_code", None)
+        http = f" (HTTP {status})" if isinstance(status, int) else ""
+        print(f"stopped: {type(exc).__name__}{http} at {os.path.basename(frame.filename)}:{frame.lineno}"
               " (message withheld; --debug shows it and may show row content)")
         return 2
 
@@ -170,19 +172,28 @@ def select_sheets(files, years, only):
     return picked, ignored
 
 
-def read_sheets(gc, picked, tab, say):
+def read_sheets(gc, picked, tab, say, sleep=time.sleep):
+    """Every sheet's rows. Reads retry 429 and 5xx: Sheets allows 60 reads a minute."""
+    from finance_core.google_retry import status_of, with_retry
+
+    def call(fn, what):
+        return with_retry(fn, sleep=sleep, what=what)
+
     rows = []
     for label, sheet_id in picked:
-        sh = gc.open_by_key(sheet_id)
+        sh = call(lambda: gc.open_by_key(sheet_id), f"open {label}")
         try:
-            ws = sh.worksheet(tab)
-        except Exception:
-            tabs = [w.title for w in sh.worksheets()]
+            ws = call(lambda: sh.worksheet(tab), f"tab {label}")
+        except Exception as exc:
+            if status_of(exc) is not None:
+                raise
+            tabs = [w.title for w in call(sh.worksheets, f"tabs {label}")]
             say(f"  {label}: no {tab!r} tab (tabs: {tabs}); skipped")
             continue
         parts = []
         for block, a1 in (("expenses", "B1:E"), ("income", "G1:J")):
-            values = ws.get(a1, value_render_option="UNFORMATTED_VALUE")
+            values = call(lambda: ws.get(a1, value_render_option="UNFORMATTED_VALUE"),
+                          f"read {label} {block}")
             start = detect_start_row(values)
             got = block_rows(label, block, values, start) if start else []
             rows.extend(got)
