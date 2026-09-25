@@ -206,6 +206,39 @@ def test_log_messages_are_counted_never_printed(capsys, root_logger):
     assert "1 warning(s), 1 error(s)" in "\n".join(counter.summary())
 
 
+def test_log_records_are_bucketed_by_fixed_labels_only(root_logger):
+    """The kinds of failure are counted; no message text is printed."""
+    counter = ev.install_quiet_logging()
+    cli = logging.getLogger("automation.claude_provider")
+    cli.error("Claude Code CLI error: exit 1; subtype=error_max_turns; "
+              f"terminal_reason=max_turns; result: {SECRET_NAME}")
+    cli.error("Claude Code CLI error: exit 1; subtype=error_max_turns; "
+              "terminal_reason=max_turns")
+    cli.error("Claude Code CLI error: exit 1; stdout not JSON (812 bytes)")
+    cli.error(f"Claude Code CLI error: exit 1; result: API Error: 529 "
+              f"Overloaded {SECRET_REM}")
+    cli.error("CLI completion failed: Claude Code CLI timed out. Run it.")
+    cli.error(f"subtype=Jolanda {SECRET_NAME}")
+    try:
+        raise RuntimeError(SECRET_NAME)
+    except RuntimeError:
+        logging.getLogger("automation.ai_categorizer").error(
+            f"Batch categorization chunk failed: {SECRET_NAME}", exc_info=True)
+    logging.getLogger("automation.ai_categorizer").warning(
+        "AI chunk call failed (RuntimeError); retrying once in 15s")
+    text = "\n".join(counter.summary())
+    assert ("automation.claude_provider ERROR [exit 1, subtype=error_max_turns, "
+            "terminal_reason=max_turns]: 2") in text
+    assert "[exit 1, stdout not JSON]: 1" in text
+    assert "[exit 1, API 529, overloaded]: 1" in text
+    assert "[timed out]: 1" in text
+    assert "automation.claude_provider ERROR [other]: 1" in text
+    assert "automation.ai_categorizer ERROR [RuntimeError]: 1" in text
+    assert "automation.ai_categorizer WARNING [retry]: 1" in text
+    for secret in (SECRET_NAME, "Jolanda", SECRET_REM, "812"):
+        assert secret not in text
+
+
 def test_a_crash_prints_the_type_and_place_only(capsys):
     def boom():
         raise ValueError(f"could not parse {SECRET_NAME}")

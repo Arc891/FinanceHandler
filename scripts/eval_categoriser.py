@@ -7,7 +7,8 @@ month per call as production does, and compares each row's category with the
 category the user gave that row in the 2024/2025 sheets. Prints scores only:
 counts, percentages and category names. It never prints a date, amount,
 description, counterparty or remittance text, and it never shows a log
-message (the categoriser's logs are counted, not printed). A crash prints the
+message (the categoriser's logs are counted, not printed, and bucketed by
+fixed labels such as `exit 1, subtype=error_max_turns`). A crash prints the
 exception type and place only; --debug shows the full traceback and may show
 row content.
 
@@ -68,16 +69,56 @@ ISO = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 # ── logging and crashes: counted, never printed ─────────────────────────────
 
+# Fixed phrases a record may contain, and the label printed for each. A
+# record is described by these labels only; its text is never printed.
+FAILURE_PHRASES = (
+    ("stdout not json", "stdout not JSON"),
+    ("no output", "no output"),
+    ("timed out", "timed out"),
+    ("overloaded", "overloaded"),
+    ("rate limit", "rate limit"),
+    ("usage limit", "usage limit"),
+    ("prompt is too long", "prompt too long"),
+    ("credit balance", "credit balance"),
+    ("unknown error", "unknown error"),
+    ("retrying once", "retry"),
+    ("budget spent", "budget spent"),
+    ("missing ids", "missing ids"),
+    ("parse fail", "parse failure"),
+)
+EXIT_CODE = re.compile(r"\bexit (-?\d{1,3})\b")
+# CLI enum values only: lower-case snake_case, so no name can pass.
+CLI_FIELD = re.compile(r"\b(subtype|terminal_reason)=([a-z_]{1,40})(?![\w])")
+API_STATUS = re.compile(r"\bapi error: (\d{3})\b", re.I)
+
+
+def failure_labels(record) -> str:
+    """Describe a log record by exception class and fixed labels only."""
+    msg = record.getMessage()
+    labels = []
+    if record.exc_info and record.exc_info[0]:
+        labels.append(record.exc_info[0].__name__)
+    labels += [f"exit {m}" for m in EXIT_CODE.findall(msg)[:1]]
+    labels += [f"{k}={v}" for k, v in CLI_FIELD.findall(msg)]
+    labels += [f"API {m}" for m in API_STATUS.findall(msg)[:1]]
+    low = msg.lower()
+    labels += [label for phrase, label in FAILURE_PHRASES if phrase in low]
+    return ", ".join(labels) or "other"
+
+
 class LogCounter:
     """A root handler that counts records and drops their messages."""
 
     def __init__(self):
         import logging
         self.counts = Counter()
+        self.kinds = Counter()
 
         class Handler(logging.Handler):
             def emit(handler, record):
                 self.counts[(record.name, record.levelname)] += 1
+                self.kinds[(record.name, record.levelname,
+                            failure_labels(record))] += 1
 
         self.handler = Handler(level=logging.WARNING)
 
@@ -87,6 +128,10 @@ class LogCounter:
         lines = [f"log: {warnings} warning(s), {errors} error(s) (messages withheld)"]
         for (name, lvl), n in sorted(self.counts.items()):
             lines.append(f"  {name} {lvl}: {n}")
+        if self.kinds:
+            lines.append("log kinds (fixed labels only):")
+        for (name, lvl, kind), n in sorted(self.kinds.items()):
+            lines.append(f"  {name} {lvl} [{kind}]: {n}")
         return lines
 
 
