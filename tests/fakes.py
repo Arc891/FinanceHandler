@@ -91,6 +91,8 @@ class FakeWorksheet:
         self.update_faults = []    # [("before"|"after", exception), ...], consumed per update
         self.get_delay = 0.0
         self.spreadsheet = None
+        self.id = None
+        self.validations = {}      # "E5" -> {"type": ..., "values": [...]}
         self._mutex = threading.Lock()
 
     # gspread surface ------------------------------------------------------
@@ -141,6 +143,10 @@ class FakeWorksheet:
             raise fault[1]
         return {"updatedRange": range_name}
 
+    def get_all_values(self, **kwargs):
+        last_col = chr(64 + min(self.col_count, 26))
+        return self.get(f"A1:{last_col}{self._rows}")
+
     def resize(self, rows=None, cols=None):
         self.calls.append(("resize", rows))
         if rows is not None:
@@ -177,27 +183,32 @@ class FakeSpreadsheet:
     def __init__(self, sheet_id="sheet-1", title="Maandelijks Budget 07/2026", tabs=None):
         self.id = sheet_id
         self.title = title
-        self._tabs = {}
-        for ws in (tabs or [FakeWorksheet("Transactions")]):
+        self.tabs = []
+        for ws in (tabs if tabs is not None else [FakeWorksheet("Transactions")]):
             self.add(ws)
 
     def add(self, ws):
         ws.spreadsheet = self
-        self._tabs[ws.title] = ws
+        if getattr(ws, "id", None) is None:
+            ws.id = 100 + len(self.tabs)
+        self.tabs.append(ws)
         return ws
 
     def worksheet(self, title):
-        try:
-            return self._tabs[title]
-        except KeyError:
-            raise gspread.exceptions.WorksheetNotFound(title) from None
+        for ws in self.tabs:
+            if ws.title == title:
+                return ws
+        raise gspread.exceptions.WorksheetNotFound(title)
 
     def worksheets(self):
-        return list(self._tabs.values())
+        return list(self.tabs)
+
+    def tab_by_id(self, tab_id):
+        return next(ws for ws in self.tabs if ws.id == tab_id)
 
     @property
     def transactions(self):
-        return self._tabs["Transactions"]
+        return self.worksheet("Transactions")
 
 
 def expense_tx(date_str="24-06-2026", amount="-12.34", name="Picnic", rem="order 1",
@@ -220,3 +231,218 @@ def income_tx(date_str="24-06-2026", amount="314.10", name="DUO Hoofdrekening", 
     tx = expense_tx(date_str, amount, name, rem, seq, description, category)
     tx.update({"credit_debit_indicator": "CRDT", "debtor": {"name": ""}, "creditor": {"name": name}})
     return tx
+
+
+# ── a month workbook and the Drive/Sheets adapter ────────────────────────────
+
+PLACEHOLDER = "! Nog in te delen !"
+HEADERS = ["Date", "Amount", "Description", "Category"]
+EXPENSE_CATEGORIES = ["Boodschappen", "Uit eten", "Abonnementen", "Vaste lasten"] + [PLACEHOLDER]
+INCOME_CATEGORIES = ["DUO", "Salaris", "Persoonlijke rekening"]
+_COL = {c: col_index(c) for c in "BCDEGHIJKL"}
+
+
+def make_transactions(rows=77):
+    ws = FakeWorksheet("Transactions", rows=rows)
+    ws.put("B4", [HEADERS + [""] + HEADERS])
+    ws.validations = {"E5": {"type": "ONE_OF_RANGE", "values": ["=Summary!$B$27:$C"]},
+                      "J5": {"type": "ONE_OF_RANGE", "values": ["=Summary!$H$27:$I$44"]}}
+    return ws
+
+
+def make_summary(spreadsheet, *, income_bound=44, income_placeholder=True):
+    """
+    Summary tab whose totals are live over ``spreadsheet``'s Transactions tab.
+
+    E26 sums expense amounts whose category is in the (open-ended) expense table,
+    K26 sums income amounts whose category is in H28:H<income_bound>; the income
+    placeholder sits at H35. E17 = L8 + K26 - E26. With no Transactions tab every
+    formula reads #REF!, as a Summary copied before its Transactions would.
+    """
+    ws = FakeWorksheet("Summary", rows=60, cols=12)
+    ws.put("B28", [[c] for c in EXPENSE_CATEGORIES])
+    ws.put("H28", [[c] for c in INCOME_CATEGORIES])
+    if income_placeholder:
+        ws.put("H35", [[PLACEHOLDER]])
+
+    def table(col, first, last):
+        return {ws.cells.get((r, _COL[col])) for r in range(first, last + 1)} - {None}
+
+    def total(amount_col, cat_col, cats):
+        def f():
+            try:
+                tx = spreadsheet.worksheet("Transactions")
+            except gspread.exceptions.WorksheetNotFound:
+                return "#REF!"
+            s = 0.0
+            for (r, c), v in list(tx.cells.items()):
+                if c == _COL[cat_col] and r >= 5 and v in cats():
+                    amt = tx.cells.get((r, _COL[amount_col]))
+                    s += amt if isinstance(amt, (int, float)) else 0
+            return round(s, 2)
+        return f
+
+    e26 = total("C", "E", lambda: table("B", 28, 60))
+    k26 = total("H", "J", lambda: table("H", 28, income_bound))
+
+    def d17():
+        v = ws.cells.get((8, _COL["L"]))
+        return v if isinstance(v, (int, float)) else 0
+
+    def e17():
+        e, k = e26(), k26()
+        if "#REF!" in (e, k):
+            return "#REF!"
+        return round(d17() + k - e, 2)
+
+    ws.cells[(26, _COL["E"])] = e26
+    ws.cells[(26, _COL["K"])] = k26
+    ws.cells[(17, _COL["D"])] = d17
+    ws.cells[(17, _COL["E"])] = e17
+    return ws
+
+
+def make_month(sheet_id, label, *, rows=0, l8=None, **summary_kw):
+    """A registered month workbook with ``rows`` expense rows."""
+    sh = FakeSpreadsheet(sheet_id, f"Maandelijks Budget {label}", tabs=[])
+    sh.add(make_summary(sh, **summary_kw))
+    sh.add(make_transactions())
+    if rows:
+        sh.transactions.put("B5", [[serial(date(2026, 6, 1 + i)), 10.0, f"r{i}", "Boodschappen"]
+                                   for i in range(rows)])
+    if l8 is not None:
+        sh.worksheet("Summary").put("L8", [[l8]])
+    return sh
+
+
+class FakeHttpError(Exception):
+    def __init__(self, status):
+        super().__init__(f"HTTP {status}")
+
+        class R:
+            pass
+        self.resp = R()
+        self.resp.status = status
+
+
+class FakeWorkbooks:
+    """Stands in for sheet_registry.GoogleWorkbooks; ``log`` records every call in order."""
+
+    TEMPLATE_ID = "template"
+    FOLDER_ID = "folder"
+    PROPS = {"locale": "nl_NL", "timeZone": "Europe/Monaco", "autoRecalc": "ON_CHANGE"}
+
+    def __init__(self, *, summary_kw=None, folder_writable=True):
+        self.books = {}
+        self.props = {}
+        self.parent = {}
+        self.trashed = set()
+        self.log = []
+        self.faults = {}
+        self.summary_kw = summary_kw or {}
+        self.folder_writable = folder_writable
+        self.copy_validations = True
+        self.extra_copy = False
+        self._n = 0
+        template = FakeSpreadsheet(self.TEMPLATE_ID, "Template Maandelijks Budget xx/2026", tabs=[])
+        template.add(make_summary(template))
+        template.add(make_transactions())
+        self.add_book(template)
+
+    def add_book(self, sh, props=None, parents=(FOLDER_ID,)):
+        self.books[sh.id] = sh
+        self.props[sh.id] = dict(props or self.PROPS)
+        self.parent[sh.id] = list(parents)
+        return sh
+
+    def _call(self, op, *args):
+        self.log.append((op,) + args)
+        pending = self.faults.get(op)
+        if pending:
+            raise pending.pop(0)
+
+    # adapter surface --------------------------------------------------------
+    def open(self, sheet_id):
+        self._call("open", sheet_id)
+        if sheet_id not in self.books or sheet_id in self.trashed:
+            raise gspread.exceptions.SpreadsheetNotFound(sheet_id)
+        return self.books[sheet_id]
+
+    def properties(self, sheet_id):
+        self._call("properties", sheet_id)
+        sh = self.books[sheet_id]
+        return dict(self.props[sheet_id], title=sh.title, tabs={ws.title: ws.id for ws in sh.tabs})
+
+    def create_workbook(self, title, locale, time_zone, auto_recalc):
+        self._call("create_workbook", title, locale, time_zone, auto_recalc)
+        self._n += 1
+        sh = FakeSpreadsheet(f"new-{self._n}", title, tabs=[FakeWorksheet("Sheet1", rows=1000, cols=26)])
+        self.add_book(sh, {"locale": locale, "timeZone": time_zone, "autoRecalc": auto_recalc},
+                      parents=("root",))
+        return sh.id, sh.tabs[0].id
+
+    def copy_tab(self, src_id, tab_id, dst_id):
+        self._call("copy_tab", src_id, tab_id, dst_id)
+        src = self.books[src_id].tab_by_id(tab_id)
+        dst = self.books[dst_id]
+        if src.title == "Summary":
+            ws = make_summary(dst, **self.summary_kw)
+        else:
+            ws = FakeWorksheet(src.title, rows=src.row_count, cols=src.col_count)
+            ws.cells = {k: v for k, v in src.cells.items()}
+            ws.validations = dict(src.validations) if self.copy_validations else {}
+        ws.title = f"Copy of {src.title}"
+        ws.id = None
+        dst.add(ws)
+        if self.extra_copy:
+            self.extra_copy = False
+            dup = FakeWorksheet(f"Copy of {src.title} 2")
+            dst.add(dup)
+        return ws.id
+
+    def rename_tab(self, sheet_id, tab_id, title):
+        self._call("rename_tab", sheet_id, tab_id, title)
+        self.books[sheet_id].tab_by_id(tab_id).title = title
+
+    def delete_tab(self, sheet_id, tab_id):
+        self._call("delete_tab", sheet_id, tab_id)
+        sh = self.books[sheet_id]
+        sh.tabs.remove(sh.tab_by_id(tab_id))
+
+    def move_tab(self, sheet_id, tab_id, index):
+        self._call("move_tab", sheet_id, tab_id, index)
+        sh = self.books[sheet_id]
+        ws = sh.tab_by_id(tab_id)
+        sh.tabs.remove(ws)
+        sh.tabs.insert(index, ws)
+
+    def parents(self, sheet_id):
+        self._call("parents", sheet_id)
+        return list(self.parent[sheet_id])
+
+    def move_to_folder(self, sheet_id, folder_id):
+        self._call("move_to_folder", sheet_id, folder_id)
+        if not self.folder_writable:
+            return False
+        self.parent[sheet_id] = [folder_id]
+        return True
+
+    def delete_file(self, sheet_id):
+        self._call("delete_file", sheet_id)
+        self.books.pop(sheet_id)
+
+    def trash_file(self, sheet_id):
+        self._call("trash_file", sheet_id)
+        self.trashed.add(sheet_id)
+
+    def validation(self, sheet_id, a1):
+        self._call("validation", sheet_id, a1)
+        tab, cell = a1.split("!")
+        return self.books[sheet_id].worksheet(tab).validations.get(cell)
+
+    # helpers ----------------------------------------------------------------
+    def ops(self, *names):
+        return [entry for entry in self.log if entry[0] in names]
+
+    def created_ids(self):
+        return [sid for sid in self.books if sid.startswith("new-")]

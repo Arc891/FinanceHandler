@@ -42,6 +42,21 @@ def label_sort_key(label: str) -> Tuple[int, int]:
     return parse_label(label)
 
 
+def next_label(label: str) -> str:
+    year, month = parse_label(label)
+    return f"{month % 12 + 1:02d}/{year + (month == 12)}"
+
+
+def previous_label(label: str) -> str:
+    year, month = parse_label(label)
+    return f"{(month - 2) % 12 + 1:02d}/{year - (month == 1)}"
+
+
+def newest(index) -> Optional[str]:
+    """The chronologically newest label in ``index``, or None when it is empty."""
+    return max(index, key=label_sort_key) if index else None
+
+
 def extract_spreadsheet_id(url_or_id: str) -> str:
     """Accept a Google Sheets URL or a bare spreadsheet id and return the id."""
     value = (url_or_id or "").strip()
@@ -92,7 +107,7 @@ def save_index(path, index: Dict[str, dict]) -> None:
 
 def register(index: Dict[str, dict], label: str, sheet_id: str, *,
              created_by_bot: bool = False, created_at: Optional[str] = None,
-             force: bool = False) -> str:
+             upload_id: Optional[str] = None, force: bool = False) -> str:
     """
     Add label -> sheet_id to ``index`` in place.
 
@@ -110,5 +125,8 @@ def register(index: Dict[str, dict], label: str, sheet_id: str, *,
         for other, entry in index.items():
             if entry["id"] == sheet_id:
                 raise IndexConflict(f"{sheet_id} is already registered as {other}")
-    index[label] = {"id": sheet_id, "created_by_bot": created_by_bot, "created_at": created_at}
+    entry = {"id": sheet_id, "created_by_bot": created_by_bot, "created_at": created_at}
+    if upload_id is not None:
+        entry["upload_id"] = upload_id     # lets undo_upload.py --drop-created find what a run made
+    index[label] = entry
     return "replaced" if current else "added"

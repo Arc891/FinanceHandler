@@ -134,3 +134,16 @@ def test_save_leaves_no_temp_file_behind(tmp_path):
     path = tmp_path / "sheet_index.json"
     save_index(path, {})
     assert [p.name for p in tmp_path.iterdir()] == ["sheet_index.json"]
+
+
+@pytest.mark.parametrize("label, nxt", [("06/2026", "07/2026"), ("12/2026", "01/2027")])
+def test_next_label_rolls_over_the_year(label, nxt):
+    from finance_core.sheet_index import next_label, previous_label
+    assert next_label(label) == nxt
+    assert previous_label(nxt) == label
+
+
+def test_newest_is_chronological_not_lexicographic():
+    from finance_core.sheet_index import newest
+    assert newest({"11/2026": {}, "12/2026": {}, "01/2027": {}}) == "01/2027"
+    assert newest({}) is None
