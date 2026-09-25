@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 
 SUMMARY_TAB = "Summary"
 HEADER = ["Date", "Amount", "Description", "Category"]
-PLACEHOLDER = "! Nog in te delen !"     # ExpenseCategory.NOG_IN_TEDELEN; the income twin arrives in Phase 3
+PLACEHOLDER = "! Nog in te delen !"     # ExpenseCategory.NOG_IN_TEDELEN and IncomeCategory.NOG_IN_TEDELEN
 FIDELITY_AMOUNT = 12.34
 TOLERANCE = 0.005
 COPIED_PROPERTIES = ("locale", "timeZone", "autoRecalc")

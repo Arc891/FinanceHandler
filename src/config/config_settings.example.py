@@ -110,7 +110,7 @@ ASN_QR_TIMEOUT_SECONDS = 300  # 5 minutes for QR scan
 # AI Categorization (Session 2 - will be configured later)
 CLAUDE_API_KEY = os.environ.get('CLAUDE_API_KEY', '')
 CLAUDE_MODEL = "claude-3-5-haiku-20241022"
-AI_CONFIDENCE_THRESHOLD = 0.75  # Min confidence for auto-approval (0.0-1.0)
+AI_CONFIDENCE_THRESHOLD = 0.75  # below this an AI result is written flagged; set by the evaluation step
 AI_CATEGORIZATION_ENABLED = False  # Enable after Session 2
 
 # Automation Schedule

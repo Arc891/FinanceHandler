@@ -66,9 +66,10 @@ class IncomeCategory(str, Enum):
     GIFT = ("Gift", r"gi")
     PERSONLIJKE_REKENING = ("Persoonlijke rekening", r"pe")
     GEMEENTE = ("Gemeente", r"ge")
+    NOG_IN_TEDELEN = ("! Nog in te delen !", r"nog|!")
     DUMMY_CACHED = ("CACHED", r"dummy|cache")
 
-    DEFAULT = PERSONLIJKE_REKENING
+    DEFAULT = NOG_IN_TEDELEN
 
 # ─────────────────────────────────────────────────────────────────────────────
 # - AUTO‐CATEGORIZATION RULES (SEPARATE FOR EXPENSE & INCOME)

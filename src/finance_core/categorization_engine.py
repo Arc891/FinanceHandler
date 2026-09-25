@@ -15,9 +15,25 @@ from typing import Dict, Any, Optional, Tuple
 from dataclasses import dataclass
 
 from automation.ai_categorizer import ClaudeCategorizer
+from constants import ExpenseCategory, IncomeCategory
 from finance_core.categorization_rules import apply_categorization_rules
+from finance_core.config_access import setting
 
 logger = logging.getLogger(__name__)
+
+# Never offered to the model: a confident placeholder answer would be written
+# flagged but missing from the flagged count (plan 4.9).
+_NOT_FOR_AI = {
+    ExpenseCategory.DUMMY_CACHED, ExpenseCategory.NOG_IN_TEDELEN,
+    IncomeCategory.DUMMY_CACHED, IncomeCategory.NOG_IN_TEDELEN,
+}
+
+
+def ai_category_options() -> Tuple[Dict[str, str], Dict[str, str]]:
+    """The (expense, income) category dictionaries handed to the AI."""
+    expense = {c.value: c.value for c in ExpenseCategory if c not in _NOT_FOR_AI}
+    income = {c.value: c.value for c in IncomeCategory if c not in _NOT_FOR_AI}
+    return expense, income
 
 
 @dataclass
@@ -148,8 +164,6 @@ class CategorizationEngine:
         try:
             # Import categories and rules
             from constants import (
-                ExpenseCategory,
-                IncomeCategory,
                 CATEGORIZATION_RULES_EXPENSE,
                 CATEGORIZATION_RULES_INCOME
             )
@@ -158,11 +172,7 @@ class CategorizationEngine:
             # Determine transaction type
             is_income = transaction.get("credit_debit_indicator") == "CRDT"
 
-            # Get available categories
-            expense_categories = {
-                cat.value: cat.value for cat in ExpenseCategory if cat != ExpenseCategory.DUMMY_CACHED}
-            income_categories = {
-                cat.value: cat.value for cat in IncomeCategory if cat != IncomeCategory.DUMMY_CACHED}
+            expense_categories, income_categories = ai_category_options()
 
             # Get example rules for AI context
             rules = CATEGORIZATION_RULES_INCOME if is_income else CATEGORIZATION_RULES_EXPENSE
@@ -247,17 +257,11 @@ class CategorizationEngine:
         if self.ai_enabled and self.ai_categorizer and unmatched:
             try:
                 from constants import (
-                    ExpenseCategory, IncomeCategory,
                     CATEGORIZATION_RULES_EXPENSE, CATEGORIZATION_RULES_INCOME
                 )
                 from automation.ai_categorizer import get_example_rules_for_ai
 
-                expense_categories = {
-                    cat.value: cat.value for cat in ExpenseCategory
-                    if cat != ExpenseCategory.DUMMY_CACHED}
-                income_categories = {
-                    cat.value: cat.value for cat in IncomeCategory
-                    if cat != IncomeCategory.DUMMY_CACHED}
+                expense_categories, income_categories = ai_category_options()
 
                 # Combine rules for examples
                 all_rules = {**CATEGORIZATION_RULES_EXPENSE, **CATEGORIZATION_RULES_INCOME}
@@ -378,7 +382,7 @@ class CategorizationEngine:
 def create_categorization_engine(
     claude_api_key: Optional[str] = None,
     ai_enabled: bool = False,
-    ai_confidence_threshold: float = 0.75
+    ai_confidence_threshold: Optional[float] = None
 ) -> CategorizationEngine:
     """
     Factory function to create a categorization engine with optional AI.
@@ -386,11 +390,15 @@ def create_categorization_engine(
     Args:
         claude_api_key: Optional Claude API key (not required if Claude Code CLI available)
         ai_enabled: Whether to enable AI categorization
-        ai_confidence_threshold: Minimum confidence for auto-approval
+        ai_confidence_threshold: Minimum confidence for an unflagged AI
+            result; None reads AI_CONFIDENCE_THRESHOLD from config
 
     Returns:
         Configured CategorizationEngine instance
     """
+    if ai_confidence_threshold is None:
+        ai_confidence_threshold = float(
+            setting("AI_CONFIDENCE_THRESHOLD", 0.75))
     ai_categorizer = None
 
     if ai_enabled:

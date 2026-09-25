@@ -1917,6 +1917,20 @@ on the Pi and set `AI_RUN_MAX_MINUTES` from it.
   existed only to dodge the UI module. `transaction_prompt.py` imports it
   from there until step 5. `tests/test_categorization_rules.py` includes a
   test that the engine's regex pass works with the UI module unimportable.
+- Done 2026-09-25 (me), step 2, 349 tests green: `IncomeCategory.NOG_IN_TEDELEN`
+  is the income `DEFAULT`. `ai_category_options()` in `categorization_engine`
+  builds both AI dictionaries, excluding both placeholders and both
+  `DUMMY_CACHED`, and is used by the batch and the per-row path.
+  `create_categorization_engine` reads `AI_CONFIDENCE_THRESHOLD` when no
+  threshold is passed. The flagging logic is `finance_core/flagging.py`:
+  `category_for` as in 4.9, and `apply_category(tx, result)`, which returns
+  the sheet row and the discarded guess. The pipeline adds the ledger key
+  to the guess in step 3. Two decisions taken where the plan left room:
+  - The belt-and-braces rule covers `regex` as well as `ai_auto`: any
+    placeholder category is flagged, whatever produced it.
+  - A flagged row without a description carries no `description` key, so
+    `format_transaction_for_sheet` falls back to counterparty plus
+    remittance.
 
 **Evaluation, categoriser quality** (added 2026-09-25; after Phase 3, before
 Phase 4). Phase 4 step 5 writes the whole backlog in one go, and
