@@ -1931,6 +1931,27 @@ on the Pi and set `AI_RUN_MAX_MINUTES` from it.
   - A flagged row without a description carries no `description` key, so
     `format_transaction_for_sheet` falls back to counterparty plus
     remittance.
+- Done 2026-09-25 (me), step 2a, 368 tests green:
+  - `categorize_batch` runs one task per chunk under the semaphore;
+    `_categorize_chunk` is the old loop body unchanged.
+  - A chunk writes its rows only after its last await, so a cancelled chunk
+    leaves all its rows `None`, never some of them.
+  - `_complete_cli` kills and reaps the process on `CancelledError`.
+  - `batch_categorize` gains `deadline`, `fallback_limit` and `max_parallel`,
+    each defaulting to config.
+  - The C-id fix maps through `regex_matched`.
+  - `time_ai_chunk.py` gains `--chunks`, `--parallel`, and `--src`, which
+    times this branch's code inside the Pi's current image. The commands
+    are in its docstring.
+
+  Decisions taken where the plan left room:
+  - `AI_PER_TX_FALLBACK_LIMIT` counts per `batch_categorize` call (one
+    period), not per failed chunk. The engine cannot see chunk boundaries,
+    and the per-period count is the tighter bound.
+  - The deadline is checked before each per-row fallback call, not during
+    it, so the budget can overrun by one per-row call (tens of seconds).
+  - **Open (user):** re-time on the Pi with `--chunks 2`, once
+    `--parallel 1` and once `--parallel 3`, and record both figures here.
 
 **Evaluation, categoriser quality** (added 2026-09-25; after Phase 3, before
 Phase 4). Phase 4 step 5 writes the whole backlog in one go, and

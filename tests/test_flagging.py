@@ -180,7 +180,7 @@ class RecordingAI:
 
     async def categorize_batch(self, transactions_to_categorize,
                                precategorized_transactions, expense_categories,
-                               income_categories, example_rules):
+                               income_categories, example_rules, **kwargs):
         self.seen.append((expense_categories, income_categories))
         return [None] * len(transactions_to_categorize)
 

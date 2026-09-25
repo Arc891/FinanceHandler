@@ -179,6 +179,12 @@ class ClaudeProvider:
                     process.communicate(),
                     timeout=180  # 3 minutes max (first request may be slow)
                 )
+            except asyncio.CancelledError:
+                # The run's AI budget cancelled this call: never leave the
+                # claude process running behind it.
+                process.kill()
+                await process.wait()
+                raise
             except asyncio.TimeoutError:
                 process.kill()
                 await process.wait()

@@ -39,3 +39,37 @@ def test_report_holds_counts_and_time_only():
     out = "\n".join(lines)
     assert "secret" not in out
     assert "5 rows" in out and "ai_auto: 5" in out and "seconds" in out
+
+
+class RecordingEngine(FakeEngine):
+    def __init__(self):
+        self.kwargs = None
+
+    async def batch_categorize(self, txs, **kwargs):
+        self.kwargs = kwargs
+        return await FakeEngine.batch_categorize(self, txs)
+
+
+def test_several_chunks_take_a_slice_of_that_many_ai_rows():
+    lines, engine = [], RecordingEngine()
+    asyncio.run(time_ai_chunk.run(rows(100), engine, size=40, chunks=2,
+                                  say=lines.append))
+    out = "\n".join(lines)
+    assert "80 rows" in out and "80 AI rows in 2 chunk(s)" in out
+    assert engine.kwargs == {}
+
+
+def test_parallel_override_reaches_the_engine():
+    lines, engine = [], RecordingEngine()
+    asyncio.run(time_ai_chunk.run(rows(5), engine, size=40, parallel=1,
+                                  say=lines.append))
+    assert engine.kwargs == {"max_parallel": 1}
+    assert "parallel 1" in "\n".join(lines)
+
+
+def test_src_option_goes_first_on_the_path(monkeypatch):
+    import sys
+    path = list(sys.path)
+    monkeypatch.setattr(sys, "path", path)
+    time_ai_chunk.prepend_src("/tmp/branch-src")
+    assert path[0] == "/tmp/branch-src"

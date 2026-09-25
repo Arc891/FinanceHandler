@@ -8,8 +8,10 @@ PRIVACY: All transaction data is anonymized before being sent to the API.
 See data_anonymizer.py for details on what is removed/kept.
 """
 
+import asyncio
 import json
 import logging
+import time
 from typing import Dict, Any, Optional, Tuple
 from automation.data_anonymizer import anonymize_for_ai, get_anonymized_summary
 from automation.claude_provider import ClaudeProvider
@@ -313,13 +315,21 @@ Respond ONLY with the JSON object, nothing else. Remember: description must be i
         precategorized_transactions: list,
         expense_categories: Dict[str, str],
         income_categories: Dict[str, str],
-        example_rules: Dict[str, Tuple[str, str]]
+        example_rules: Dict[str, Tuple[str, str]],
+        deadline: Optional[float] = None,
+        max_parallel: int = 3
     ) -> list:
         """
-        Categorize a batch of transactions in a single AI call.
+        Categorize a batch of transactions, one AI call per chunk of 40.
+
+        Chunks run concurrently, at most max_parallel at a time. Each chunk's
+        prompt holds only its own rows plus the pre-categorized context, so
+        running them together gives the same result as one after another.
+        A chunk unfinished at deadline (time.monotonic() seconds) is
+        cancelled.
 
         Returns list of (category, description, confidence, relationship_info) tuples.
-        Returns None at positions where categorization failed.
+        Returns None at positions where categorization failed or timed out.
         """
         from automation.data_anonymizer import anonymize_batch_for_ai
 
@@ -345,93 +355,124 @@ Respond ONLY with the JSON object, nothing else. Remember: description must be i
                 anon_to_categorize, transactions_to_categorize, expected_ids, chunk_size)
 
         all_results = [None] * len(transactions_to_categorize)
-        offset = 0
+        if deadline is not None and time.monotonic() >= deadline:
+            logger.warning("AI budget already spent; no batch call made")
+            return all_results
 
-        for chunk_anon, chunk_orig, chunk_ids in chunks:
-            prompt = self._build_batch_prompt(
-                chunk_anon, anon_precategorized, precategorized_transactions,
-                expense_categories, income_categories, example_rules, chunk_ids
-            )
+        semaphore = asyncio.Semaphore(max(1, max_parallel))
 
-            try:
-                response_text = await self.provider.complete(
-                    prompt=prompt, max_tokens=8192, temperature=0.3)
+        async def run(chunk, offset):
+            async with semaphore:
+                await self._categorize_chunk(
+                    *chunk, offset, all_results, anon_precategorized,
+                    precategorized_transactions, expense_categories,
+                    income_categories, example_rules, name_mapping)
 
-                parsed, missing_ids = self._parse_batch_response(
-                    response_text, chunk_ids,
-                    list(expense_categories.keys()) + list(income_categories.keys()))
+        tasks, offset = [], 0
+        for chunk in chunks:
+            tasks.append(asyncio.create_task(run(chunk, offset)))
+            offset += len(chunk[2])
 
-                # Repair if needed
-                if missing_ids and parsed is not None:
-                    logger.warning(f"Partial failure: {len(missing_ids)} missing IDs, attempting repair")
-                    repaired = await self._repair_batch_response(
-                        None, f"{len(missing_ids)} transactions missing",
-                        missing_ids, chunk_anon, chunk_ids,
-                        expense_categories, income_categories)
-                    if repaired:
-                        parsed.update(repaired)
-                        missing_ids = [tid for tid in chunk_ids if tid not in parsed]
-
-                elif parsed is None:
-                    logger.warning("Total parse failure, attempting repair")
-                    parsed_repair, still_missing = self._parse_batch_response(
-                        "", chunk_ids,
-                        list(expense_categories.keys()) + list(income_categories.keys()))
-                    repaired = await self._repair_batch_response(
-                        response_text[:2000], "JSON parse failed",
-                        chunk_ids, chunk_anon, chunk_ids,
-                        expense_categories, income_categories)
-                    if repaired:
-                        parsed = repaired
-                        missing_ids = [tid for tid in chunk_ids if tid not in parsed]
-                    else:
-                        missing_ids = chunk_ids
-
-                # Map results back
-                for i, tid in enumerate(chunk_ids):
-                    idx = offset + i
-                    if parsed and tid in parsed:
-                        entry = parsed[tid]
-                        confidence_map = {'high': 0.9, 'medium': 0.6, 'low': 0.3}
-                        conf = confidence_map.get(
-                            entry.get('confidence', 'low').lower(), 0.3)
-
-                        # De-anonymize description
-                        orig_tx = chunk_orig[i]
-                        counterparty_orig = (
-                            orig_tx.get('creditor', {}).get('name', '') or
-                            orig_tx.get('debtor', {}).get('name', ''))
-                        ai_desc = entry.get('description', '')
-                        final_desc = self._build_local_description(
-                            counterparty_orig, ai_desc, entry.get('category', ''))
-
-                        # De-anonymize description_suffix
-                        suffix = entry.get('description_suffix')
-                        if suffix:
-                            for placeholder, real_name in name_mapping.items():
-                                suffix = suffix.replace(placeholder, real_name)
-
-                        relationship = None
-                        if entry.get('linked_to') or suffix:
-                            relationship = {
-                                'linked_to': entry.get('linked_to', []),
-                                'description_suffix': suffix
-                            }
-
-                        all_results[idx] = (
-                            entry.get('category'),
-                            final_desc,
-                            conf,
-                            relationship
-                        )
-
-            except Exception as e:
-                logger.error(f"Batch categorization chunk failed: {e}", exc_info=True)
-                # Leave None entries for this chunk — caller handles fallback
-
-            offset += len(chunk_ids)
+        timeout = None if deadline is None else max(0.0, deadline - time.monotonic())
+        _, pending = await asyncio.wait(tasks, timeout=timeout)
+        if pending:
+            logger.warning(
+                f"AI budget spent: cancelling {len(pending)} unfinished chunk(s)")
+            for task in pending:
+                task.cancel()
+            await asyncio.gather(*pending, return_exceptions=True)
 
         return all_results
+
+    async def _categorize_chunk(
+        self, chunk_anon, chunk_orig, chunk_ids, offset, all_results,
+        anon_precategorized, precategorized_transactions,
+        expense_categories, income_categories, example_rules, name_mapping
+    ):
+        """Categorize one chunk and write its entries into all_results.
+
+        Failures leave the chunk's entries None; the caller falls back.
+        """
+        prompt = self._build_batch_prompt(
+            chunk_anon, anon_precategorized, precategorized_transactions,
+            expense_categories, income_categories, example_rules, chunk_ids
+        )
+
+        try:
+            response_text = await self.provider.complete(
+                prompt=prompt, max_tokens=8192, temperature=0.3)
+
+            parsed, missing_ids = self._parse_batch_response(
+                response_text, chunk_ids,
+                list(expense_categories.keys()) + list(income_categories.keys()))
+
+            # Repair if needed
+            if missing_ids and parsed is not None:
+                logger.warning(f"Partial failure: {len(missing_ids)} missing IDs, attempting repair")
+                repaired = await self._repair_batch_response(
+                    None, f"{len(missing_ids)} transactions missing",
+                    missing_ids, chunk_anon, chunk_ids,
+                    expense_categories, income_categories)
+                if repaired:
+                    parsed.update(repaired)
+                    missing_ids = [tid for tid in chunk_ids if tid not in parsed]
+
+            elif parsed is None:
+                logger.warning("Total parse failure, attempting repair")
+                parsed_repair, still_missing = self._parse_batch_response(
+                    "", chunk_ids,
+                    list(expense_categories.keys()) + list(income_categories.keys()))
+                repaired = await self._repair_batch_response(
+                    response_text[:2000], "JSON parse failed",
+                    chunk_ids, chunk_anon, chunk_ids,
+                    expense_categories, income_categories)
+                if repaired:
+                    parsed = repaired
+                    missing_ids = [tid for tid in chunk_ids if tid not in parsed]
+                else:
+                    missing_ids = chunk_ids
+
+            # Map results back
+            for i, tid in enumerate(chunk_ids):
+                idx = offset + i
+                if parsed and tid in parsed:
+                    entry = parsed[tid]
+                    confidence_map = {'high': 0.9, 'medium': 0.6, 'low': 0.3}
+                    conf = confidence_map.get(
+                        entry.get('confidence', 'low').lower(), 0.3)
+
+                    # De-anonymize description
+                    orig_tx = chunk_orig[i]
+                    counterparty_orig = (
+                        orig_tx.get('creditor', {}).get('name', '') or
+                        orig_tx.get('debtor', {}).get('name', ''))
+                    ai_desc = entry.get('description', '')
+                    final_desc = self._build_local_description(
+                        counterparty_orig, ai_desc, entry.get('category', ''))
+
+                    # De-anonymize description_suffix
+                    suffix = entry.get('description_suffix')
+                    if suffix:
+                        for placeholder, real_name in name_mapping.items():
+                            suffix = suffix.replace(placeholder, real_name)
+
+                    relationship = None
+                    if entry.get('linked_to') or suffix:
+                        relationship = {
+                            'linked_to': entry.get('linked_to', []),
+                            'description_suffix': suffix
+                        }
+
+                    all_results[idx] = (
+                        entry.get('category'),
+                        final_desc,
+                        conf,
+                        relationship
+                    )
+
+        except Exception as e:
+            logger.error(f"Batch categorization chunk failed: {e}", exc_info=True)
+            # Leave None entries for this chunk — caller handles fallback
 
     def _build_chunks(self, anon_txs, orig_txs, ids, chunk_size):
         """Split transactions into chunks, avoiding splitting same counterparty."""

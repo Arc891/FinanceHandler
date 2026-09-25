@@ -11,6 +11,7 @@ Flow:
 """
 
 import logging
+import time
 from typing import Dict, Any, Optional, Tuple
 from dataclasses import dataclass
 
@@ -225,10 +226,20 @@ class CategorizationEngine:
             )
 
     async def batch_categorize(
-        self, transactions: list[Dict[str, Any]]
+        self, transactions: list[Dict[str, Any]],
+        deadline: Optional[float] = None,
+        fallback_limit: Optional[int] = None,
+        max_parallel: Optional[int] = None
     ) -> list[CategorizationResult]:
         """
         Categorize a batch: regex first on all, then batch AI for unmatched.
+
+        deadline (time.monotonic() seconds) is the run's AI budget: batch
+        chunks unfinished by then are cancelled and no per-row fallback call
+        starts after it. At most fallback_limit rows (config
+        AI_PER_TX_FALLBACK_LIMIT) fall back to a per-row call. A row that
+        gets no AI answer comes back with method 'none'. max_parallel
+        overrides config AI_MAX_PARALLEL_CHUNKS.
 
         Returns list of CategorizationResult, one per input transaction.
         """
@@ -252,6 +263,20 @@ class CategorizationEngine:
         logger.info(
             f"Regex pass: {len(regex_matched)} matched, "
             f"{len(unmatched)} need AI")
+
+        if fallback_limit is None:
+            fallback_limit = int(setting("AI_PER_TX_FALLBACK_LIMIT", 10))
+        if max_parallel is None:
+            max_parallel = int(setting("AI_MAX_PARALLEL_CHUNKS", 3))
+        fallbacks = {"made": 0, "skipped": 0}
+
+        async def fallback(tx):
+            out_of_time = deadline is not None and time.monotonic() >= deadline
+            if out_of_time or fallbacks["made"] >= fallback_limit:
+                fallbacks["skipped"] += 1
+                return None
+            fallbacks["made"] += 1
+            return await self._apply_ai_categorization(tx)
 
         # Pass 2: batch AI for unmatched
         if self.ai_enabled and self.ai_categorizer and unmatched:
@@ -286,7 +311,9 @@ class CategorizationEngine:
                     precategorized_transactions=precategorized,
                     expense_categories=expense_categories,
                     income_categories=income_categories,
-                    example_rules=example_rules
+                    example_rules=example_rules,
+                    deadline=deadline,
+                    max_parallel=max_parallel
                 )
 
                 # Map AI results back and handle fallback for failures
@@ -296,8 +323,7 @@ class CategorizationEngine:
                     if ai_result is None:
                         # Batch failed for this tx — fall back to individual
                         logger.info(f"Falling back to per-tx AI for index {orig_idx}")
-                        fallback = await self._apply_ai_categorization(orig_tx)
-                        results[orig_idx] = fallback
+                        results[orig_idx] = await fallback(orig_tx)
                     else:
                         category, description, confidence, relationship = ai_result
                         method = self._decide_method(confidence, description)
@@ -318,15 +344,19 @@ class CategorizationEngine:
 
                 # Pass 3: apply relationship annotations to regex-matched
                 self._apply_relationship_annotations(
-                    results, unmatched, ai_results)
+                    results, regex_matched, ai_results)
 
             except Exception as e:
                 logger.error(f"Batch AI failed: {e}", exc_info=True)
                 # Fall back to per-transaction for all unmatched
                 for orig_idx, orig_tx in unmatched:
                     if results[orig_idx] is None:
-                        fallback = await self._apply_ai_categorization(orig_tx)
-                        results[orig_idx] = fallback
+                        results[orig_idx] = await fallback(orig_tx)
+
+        if fallbacks["skipped"]:
+            logger.warning(
+                f"{fallbacks['skipped']} row(s) got no per-row AI fallback "
+                f"(limit {fallback_limit} or AI budget spent)")
 
         # Fill remaining None results
         for i, r in enumerate(results):
@@ -345,15 +375,14 @@ class CategorizationEngine:
         return results
 
     def _apply_relationship_annotations(
-        self, results, unmatched, ai_results
+        self, results, regex_matched, ai_results
     ):
-        """Apply relationship suffixes to regex-matched transactions if linked."""
-        # Build a map from T-id to unmatched index
-        tid_to_unmatched_idx = {}
-        for j, (orig_idx, _) in enumerate(unmatched):
-            tid_to_unmatched_idx[f"T{j+1}"] = orig_idx
+        """Apply relationship suffixes to regex-matched transactions if linked.
 
-        for j, ai_result in enumerate(ai_results or []):
+        C-ids number the regex-matched rows in the order the prompt listed
+        them (1-based), so C<n> is regex_matched[n-1], not results[n-1].
+        """
+        for ai_result in ai_results or []:
             if ai_result is None:
                 continue
             _, _, _, relationship = ai_result
@@ -362,21 +391,24 @@ class CategorizationEngine:
 
             linked_ids = relationship.get('linked_to', [])
             suffix = relationship.get('description_suffix')
+            if not suffix:
+                continue
 
             for linked_id in linked_ids:
-                if linked_id.startswith('C'):
-                    # Links to a regex-matched transaction
-                    # C-ids are 1-based into precategorized list
-                    try:
-                        c_idx = int(linked_id[1:]) - 1
-                        if 0 <= c_idx < len(results) and results[c_idx] is not None:
-                            # Don't change category, just add suffix
-                            if suffix and results[c_idx].method == 'regex':
-                                results[c_idx].description_suffix = suffix
-                                logger.info(
-                                    f"Added relationship suffix to regex tx C{c_idx+1}: {suffix}")
-                    except (ValueError, IndexError):
-                        pass
+                if not linked_id.startswith('C'):
+                    continue
+                try:
+                    c_idx = int(linked_id[1:]) - 1
+                except ValueError:
+                    continue
+                if not 0 <= c_idx < len(regex_matched):
+                    continue
+                orig_idx = regex_matched[c_idx][0]
+                # Don't change category, just add suffix
+                if results[orig_idx].method == 'regex':
+                    results[orig_idx].description_suffix = suffix
+                    logger.info(
+                        f"Added relationship suffix to regex tx {linked_id}: {suffix}")
 
 
 def create_categorization_engine(
