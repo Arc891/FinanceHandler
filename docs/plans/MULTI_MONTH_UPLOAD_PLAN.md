@@ -1950,8 +1950,10 @@ on the Pi and set `AI_RUN_MAX_MINUTES` from it.
     and the per-period count is the tighter bound.
   - The deadline is checked before each per-row fallback call, not during
     it, so the budget can overrun by one per-row call (tens of seconds).
-  - **Open (user):** re-time on the Pi with `--chunks 2`, once
-    `--parallel 1` and once `--parallel 3`, and record both figures here.
+  - Re-timed 2026-09-25 (user, Pi, fixture, `--chunks 2`, 80 AI rows):
+    `--parallel 1` took **160.4 s** (about 80 s per chunk, as in
+    Phase 2). The `--parallel 3` elapsed line is still to be recorded.
+    Neither run had a no-answer row.
 - Done 2026-09-25 (me), step 3, 449 tests green:
   - `export.py` is now `Pipeline` with `process_upload`, `resume`,
     `cancel`, `sort` and `status`. It has no Discord import. Progress is
@@ -2135,8 +2137,8 @@ measures them on months where the right answer is already known.
   - Threshold table, run 1 ("rows needing you" = flagged plus wrong
     unflagged): ≥ 0.9 → 734; ≥ 0.6 → 679; everything → 662. Lowering
     to 0.6 saves about 55 rows over 19 months but writes about 140
-    more rows wrong and unflagged. **Recommendation: keep 0.75**, which
-    acts as 0.9. Pending the user's decision.
+    more rows wrong and unflagged. **Decided (user, 2026-09-25): keep
+    `AI_CONFIDENCE_THRESHOLD = 0.75`**, which acts as 0.9.
   - **Haiku hung** in run 1 after 8 of 19 months (about 3.5 h idle, no
     CPU, no child process). SIGINT showed it waiting in
     `categorize_batch`'s `asyncio.wait(tasks, timeout=None)`
@@ -2156,8 +2158,11 @@ measures them on months where the right answer is already known.
     - give each chunk an outer timeout in `categorize_batch`.
 
     Then rerun Haiku, and pick the model.
-  - The share of no-answer rows is the next diagnosis. The timing run on
-    the anonymised fixture prints the CLI's error lines.
+  - The no-answer rows are the next diagnosis. The timing run below
+    (fixture, 2 chunks) had none, at parallel 1 or 3, and printed no
+    errors. So the failures probably build up over a long run, from
+    rate or usage limits or from the same cleanup fault. Count the CLI's
+    error types (never their text) over a long run to find out.
 - Later, in its own session: a local model or Jev, scored with the same
   script (`/home/wsl/Coding/jev-investigation.md`).
 
