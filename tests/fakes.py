@@ -16,7 +16,7 @@ FakeWorksheet models what matters for the append contract (plan 4.5, 4.6):
 import re
 import threading
 import time
-from datetime import date
+from datetime import date, timedelta
 
 import gspread
 
@@ -93,6 +93,7 @@ class FakeWorksheet:
         self.spreadsheet = None
         self.id = None
         self.validations = {}      # "E5" -> {"type": ..., "values": [...]}
+        self.date_columns = set()  # column numbers formatted as dates (rendered DD-MM-YYYY)
         self._mutex = threading.Lock()
 
     # gspread surface ------------------------------------------------------
@@ -116,7 +117,15 @@ class FakeWorksheet:
                     v = v()
                 if isinstance(v, float) and v.is_integer():
                     v = int(v)
-                row.append("" if v is None else (v if unformatted else _render_nl(v)))
+                if v is None:
+                    row.append("")
+                elif unformatted:
+                    row.append(v)
+                elif c in self.date_columns and isinstance(v, int) and not isinstance(v, bool):
+                    d = EPOCH + timedelta(days=v)
+                    row.append(f"{d.day:02d}-{d.month:02d}-{d.year}")
+                else:
+                    row.append(_render_nl(v))
             while row and _blank(row[-1]):
                 row.pop()
             out.append(row)
@@ -245,6 +254,7 @@ _COL = {c: col_index(c) for c in "BCDEGHIJKL"}
 def make_transactions(rows=77):
     ws = FakeWorksheet("Transactions", rows=rows)
     ws.put("B4", [HEADERS + [""] + HEADERS])
+    ws.date_columns = {col_index("B"), col_index("G")}
     ws.validations = {"E5": {"type": "ONE_OF_RANGE", "values": ["=Summary!$B$27:$C"]},
                       "J5": {"type": "ONE_OF_RANGE", "values": ["=Summary!$H$27:$I$44"]}}
     return ws
@@ -391,6 +401,7 @@ class FakeWorkbooks:
             ws = FakeWorksheet(src.title, rows=src.row_count, cols=src.col_count)
             ws.cells = {k: v for k, v in src.cells.items()}
             ws.validations = dict(src.validations) if self.copy_validations else {}
+            ws.date_columns = set(src.date_columns)
         ws.title = f"Copy of {src.title}"
         ws.id = None
         dst.add(ws)
