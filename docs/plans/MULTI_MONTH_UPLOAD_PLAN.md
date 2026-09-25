@@ -1319,7 +1319,7 @@ PERIOD_LABEL_SPLIT_DAY = 15
 PERIOD_STATE_PATH = "data/period_state.json"
 UPLOAD_LEDGER_PATH = "data/upload_ledger.json"
 AI_CONFIDENCE_THRESHOLD = 0.75                  # flag or not; never write or not
-AI_RUN_MAX_MINUTES = 30                         # re-sized in Phase 2
+AI_RUN_MAX_MINUTES = 30                         # confirmed in Phase 2: 78 s per 40-row chunk on the Pi
 AI_PER_TX_FALLBACK_LIMIT = 10
 AI_BUDGET_TRIP_ACTION = "write_flagged"         # or "stop"; see 4.7
 ```
@@ -1836,7 +1836,17 @@ on the Pi and set `AI_RUN_MAX_MINUTES` from it.
     apart; it is kept as a guard and tested directly.
   - `scripts/time_ai_chunk.py` times one chunk on the Pi's current image
     (its AI code equals this branch's), printing counts and seconds only.
-    **Open**: running it on the Pi and setting `AI_RUN_MAX_MINUTES`.
+  - Done 2026-09-25 (user, on the Pi's running container, fixture input):
+    one chunk of 40 AI rows (a 65-row slice, 25 regex-matched) took
+    **78.4 s**. Sizing: chunks stay within a period, a full month is about
+    100-110 rows and about 62 % of them reach the AI on the fixture, so about
+    two chunks per month; the backlog (the `05/2026` tail plus `06/2026` to
+    `09/2026`) is about 9 chunks, about 12 minutes. With 1.5x for variance and
+    two failed chunks falling back to 10 per-row calls each, the worst case is
+    about 25 minutes. **`AI_RUN_MAX_MINUTES` stays 30.** One sample only; the
+    fixture's person names and references are scrambled, so its regex hit rate
+    and its 24-of-40 low-confidence share are both pessimistic for real data.
+    **Phase 2 is complete.**
 
 **Phase 3, pipeline and UI**, in this order:
 
