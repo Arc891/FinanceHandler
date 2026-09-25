@@ -1321,6 +1321,7 @@ UPLOAD_LEDGER_PATH = "data/upload_ledger.json"
 AI_CONFIDENCE_THRESHOLD = 0.75                  # flag or not; never write or not
 AI_RUN_MAX_MINUTES = 30                         # confirmed in Phase 2: 78 s per 40-row chunk on the Pi
 AI_PER_TX_FALLBACK_LIMIT = 10
+AI_MAX_PARALLEL_CHUNKS = 3                      # Phase 3 step 2a
 AI_BUDGET_TRIP_ACTION = "write_flagged"         # or "stop"; see 4.7
 ```
 
@@ -1862,6 +1863,43 @@ on the Pi and set `AI_RUN_MAX_MINUTES` from it.
    `AI_CONFIDENCE_THRESHOLD` from config; exclude both placeholders from the
    AI category dictionaries at `categorization_engine.py:164-167` and
    `:257-262`. Add the flagging logic of 4.9 and `tests/test_flagging.py`.
+2a. **AI chunks in parallel** (added 2026-09-25). `categorize_batch`
+   (`ai_categorizer.py:350`) runs its chunks sequentially, but each chunk's
+   prompt holds only its own rows plus the shared pre-categorised context,
+   so no chunk ever saw another's output. Running them together therefore
+   cannot change a result. Model, prompt and the `"reasoning"` field stay
+   as they are: any change to those waits for the evaluation step below.
+   - `asyncio.gather` over the chunks, bounded by an `asyncio.Semaphore` of
+     `AI_MAX_PARALLEL_CHUNKS` (new config key, default 3; each chunk is one
+     `claude -p` Node process on the Pi). Results are placed by each chunk's
+     precomputed offset, not by completion order.
+   - `categorize_batch` takes an optional `deadline` (monotonic seconds),
+     which is how 4.7's AI budget trips once chunks no longer run one after
+     another. A chunk unfinished at the deadline is cancelled and its rows
+     come back `None`. Past the deadline the engine makes no per-row fallback
+     call, and before it at most `AI_PER_TX_FALLBACK_LIMIT` rows fall back.
+   - `_complete_cli` kills its subprocess on `CancelledError` as it already
+     does on timeout. Otherwise a cancelled chunk leaves a `claude` process
+     running on the Pi.
+   - Fix found while reading: `_apply_relationship_annotations`
+     (`categorization_engine.py:374-392`) resolves `C<n>` as `results[n-1]`,
+     a position in the whole upload, but C-ids number the regex-matched rows
+     only (`ai_categorizer.py:480`). So a relationship suffix meant for a
+     regex row lands on the wrong row, or on none. It must map through
+     `regex_matched[n-1]`.
+   - Tests (`tests/test_ai_parallel.py`, `FakeAI` with per-chunk delays):
+     results match the sequential order when chunks finish out of order;
+     at most `AI_MAX_PARALLEL_CHUNKS` calls are in flight; one failing chunk
+     leaves only its own rows `None`; the deadline cancels the unfinished
+     chunks and no fallback runs after it; a fallback beyond the limit is not
+     made; a cancelled CLI call kills its process. Plus a test that `C2`
+     annotates the second regex-matched row.
+   - Re-time on the Pi with `scripts/time_ai_chunk.py`, extended to a
+     multi-chunk slice (a whole period), and record the figure next to the
+     Phase 2 one. Expect about 2x on a normal month, because a month is only
+     about two chunks. A bigger gain would need categorising several periods
+     at once. That changes 4.1's per-period order and is **not** part of
+     this step.
 3. `export.py` rewritten to `process_upload`, run state, in-flight guard,
    resume reconciliation.
 4. `bot_commands.py` and `bot.py`: new command surface, config self-check,
@@ -1872,6 +1910,64 @@ on the Pi and set `AI_RUN_MAX_MINUTES` from it.
    in the same commit drops both `DUMMY_CACHED` members** now that nothing
    reads them. Exit check:
    `grep -rn "background_upload\|pending_transactions\|transaction_prompt\|session_management\|DUMMY_CACHED" src` is empty.
+
+**Evaluation, categoriser quality** (added 2026-09-25; after Phase 3, before
+Phase 4). Phase 4 step 5 writes the whole backlog in one go, and
+`AI_CONFIDENCE_THRESHOLD` decides how much of it gets flagged. The 0.75
+threshold, and Sonnet over Haiku, were chosen without measuring. This step
+measures them on months where the right answer is already known.
+
+- **Answer key: the 2024 and 2025 sheets.** The user checked these by hand.
+  2026 is mostly AI-written, so scoring against it would largely measure the
+  model against itself; it is excluded. The 2024/2025 sheets are not in
+  `sheet_index.json` and are not added to it. The script takes their ids
+  with `--sheet MM/YYYY=<id>`, or lists the `Financiën` subfolders with the
+  service account (read-only, as `sheet_shape.py` does). First, as a
+  structure-only check, run `sheet_shape.py` on one 2024 sheet: its data
+  start row and block columns may differ from today's template.
+- **Input: the user's ASN exports** covering 2024-2025.
+- `scripts/eval_categoriser.py`:
+  1. Load the exports with `csv_helper` and read each sheet's two blocks.
+  2. Match every CSV row to a sheet row on (date, absolute amount, block),
+     as a multiset. When several sheet rows share a key, consume one whose
+     category equals the prediction if there is one; otherwise consume any.
+     Rows that match nothing are counted, not scored.
+  3. Group the matched rows by sheet and run each group through the real
+     `CategorizationEngine.batch_categorize`, regex and AI, one month per
+     call. That gives the same one-month relationship context as production
+     (4.7). With `--model sonnet|haiku` and `--runs N`.
+  4. Map 2024/2025 category names onto today's enums with `--map old=new`.
+     Any sheet category still unmapped is **listed by name**.
+- **Output is scores only.** It never prints a description, counterparty,
+  amount or date (memory `no-reading-real-transactions`).
+  - Matched and unmatched row counts; ambiguous keys.
+  - % correct: overall, regex versus AI, per confidence band (high 0.9,
+    medium 0.6, low 0.3), and per true category with its count.
+  - Per threshold (≥ 0.9, ≥ 0.6, everything): share of AI rows flagged,
+    and accuracy of the rows written unflagged. This table is what sets the
+    threshold, which can only fall between bands.
+  - With `--runs 2`: each run's overall score and the share of rows whose
+    category differed between runs. That is the noise floor any comparison
+    has to beat.
+  - Category only. Description quality is not scored.
+- Known biases, stated with the numbers:
+  - The regex rules were written from these same years, so regex accuracy
+    comes out optimistic.
+  - The key holds the user's final category, including later corrections.
+  - Relationships that cross a month boundary stay unlinked, as in
+    production.
+- Order:
+  1. Score Sonnet twice.
+  2. Score Haiku twice.
+  3. The user pastes the numbers.
+  4. Set `AI_CONFIDENCE_THRESHOLD`, and the model, from them.
+  5. Only then consider dropping `"reasoning"` or other prompt changes, each
+     scored the same way.
+- Run time: about 24 months at about two chunks each is about 48 chunks per
+  run, so about 30 minutes per run with 2a's parallelism. The script runs
+  from the workstation's venv, not the Pi.
+- Later, in its own session: a local model or Jev, scored with the same
+  script (`/home/wsl/Coding/jev-investigation.md`).
 
 **Phase 4, tools, docs, cutover** (in this order)
 
