@@ -15,6 +15,7 @@ from typing import Dict, Any, Optional, Tuple
 from dataclasses import dataclass
 
 from automation.ai_categorizer import ClaudeCategorizer
+from finance_core.categorization_rules import apply_categorization_rules
 
 logger = logging.getLogger(__name__)
 
@@ -115,12 +116,9 @@ class CategorizationEngine:
         """
         Apply regex categorization rules.
 
-        This is the existing logic from transaction_prompt.py.
         Returns (category, description) or (None, None) if no match.
         """
         try:
-            # Import here to avoid circular dependency
-            from finance_core.ui.transaction_prompt import apply_categorization_rules
             return apply_categorization_rules(transaction)
         except Exception as e:
             logger.error(f"Error applying regex rules: {e}")

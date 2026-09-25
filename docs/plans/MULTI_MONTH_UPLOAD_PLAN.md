@@ -1911,6 +1911,13 @@ on the Pi and set `AI_RUN_MAX_MINUTES` from it.
    reads them. Exit check:
    `grep -rn "background_upload\|pending_transactions\|transaction_prompt\|session_management\|DUMMY_CACHED" src` is empty.
 
+- Done 2026-09-25 (me), step 1, 320 tests green:
+  `finance_core/categorization_rules.py` holds the function verbatim.
+  `categorization_engine` imports it at module level; the lazy import
+  existed only to dodge the UI module. `transaction_prompt.py` imports it
+  from there until step 5. `tests/test_categorization_rules.py` includes a
+  test that the engine's regex pass works with the UI module unimportable.
+
 **Evaluation, categoriser quality** (added 2026-09-25; after Phase 3, before
 Phase 4). Phase 4 step 5 writes the whole backlog in one go, and
 `AI_CONFIDENCE_THRESHOLD` decides how much of it gets flagged. The 0.75
