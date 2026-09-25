@@ -7,9 +7,9 @@ against Google's documentation on that date.
 
 Status: tick each box as it is done.
 
-- [ ] 1. Income placeholder applied to the sheets (dry run checked 2026-09-25: all seven `would-write`)
-- [ ] 2. OAuth client created and saved to `data/google/oauth_client.json`
-- [ ] 3. Consent screen tested: "unverified" warning, not "access blocked" (**gates Phase 1**)
+- [x] 1. Income placeholder applied to the sheets (2026-09-25)
+- [x] 2. OAuth client created and saved to `data/google/oauth_client.json` (2026-09-25)
+- [x] 3. Consent screen tested: "unverified" warning, both scopes granted (2026-09-25; **Phase 1 unblocked**)
 - [ ] 4. Bank sequence number compared across two exports: same / different
 - [ ] 5. Fixture `tests/fixtures/multi_month.csv` made, reviewed and committed (**gates Phase 2**)
 
@@ -52,16 +52,35 @@ Sign in to <https://console.cloud.google.com> with the Google account that
    Then **Update** > **Save**. Do **not** add any other `drive` scope, even if
    the console suggests one. They are "restricted", and Google then requires a
    paid security audit every year.
-4. **Audience** > **Publish app** > confirm. The status must read
+4. **Branding, second pass** (publishing an External app is refused until
+   this is filled in):
+   - **Application home page**: `https://hulsman.dev`
+   - **Application privacy policy link**: `https://hulsman.dev/privacy`
+   - **Authorized domains** > **+ Add domain** > `hulsman.dev` (bare domain,
+     no `https://`). Until it is listed the page shows "Missing domain".
+   - Terms of service: optional.
+   - **Leave the logo empty.** Uploading one sends a production app into
+     Google's verification.
+   - **Save**. Only you see these links (on your own consent screen), and
+     Google checks the pages only if you submit for verification. If the
+     domain is refused as unverified, add it in Google Search Console first
+     (DNS TXT record).
+5. **Audience** > **Publish app** > confirm. The status must read
    **In production**. In "Testing" Google expires the login after 7 days. You
    do not need to submit for verification.
-5. **Clients** > **Create Client**:
+
+   The page keeps saying "Your app requires verification" (standard for the
+   sensitive `spreadsheets` scope). If a branding check is started, it fails
+   on domain ownership and privacy-policy content. That is expected and
+   harmless: leave the issues open, do not request re-verification. The app
+   works unverified (up to 100 users) with the "unverified app" warning.
+6. **Clients** > **Create Client**:
    - Application type: **Desktop app**
    - Name: `finance-bot-desktop`
    - **Create**, then **download the JSON right away**. Google only shows the
      client secret once, at creation. If you miss it, delete the client and
      create a new one.
-6. Put the file in place (Windows downloads are at
+7. Put the file in place (Windows downloads are at
    `/mnt/c/Users/Ezra/Downloads/`):
 
    ```
@@ -78,17 +97,35 @@ Run this in **your own terminal, not through `!` in a Claude session**, so
 the saved token never lands in a conversation:
 
 ```
-venv/bin/google-oauthlib-tool --client-secrets data/google/oauth_client.json \
-  --scope https://www.googleapis.com/auth/spreadsheets \
-  --scope https://www.googleapis.com/auth/drive.file \
-  --save --credentials data/google/consent_test.json
+venv/bin/python - <<'PY'
+import os
+from google_auth_oauthlib.flow import InstalledAppFlow
+flow = InstalledAppFlow.from_client_secrets_file(
+    "data/google/oauth_client.json",
+    scopes=["https://www.googleapis.com/auth/spreadsheets",
+            "https://www.googleapis.com/auth/drive.file"])
+creds = flow.run_local_server(host="127.0.0.1", port=0, open_browser=False)
+path = "data/google/consent_test.json"
+with open(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as fh:
+    fh.write(creds.to_json())
+print("credentials saved:", path, "| scopes:", sorted(creds.scopes or []))
+PY
 ```
 
-1. If no browser opens, copy the printed URL into your Windows browser. Pick
-   the account that owns `Financiën`.
+(`google-oauthlib-tool` is not used because it always binds port 8080, which
+is taken on this machine; `port=0` picks a free one.)
+
+1. Copy the **whole** printed URL into a **private/incognito** window of
+   your Windows browser and sign in with the account that owns `Financiën`.
+   Keep the script running until the browser says the flow is complete.
+   (First attempt on 2026-09-25: the browser jumped straight to an already
+   signed-in account and showed "Error 400: invalid_request ... doesn't
+   comply with Google's OAuth 2.0 policy". A fresh URL, `127.0.0.1` and
+   picking the right account fixed it.)
 2. **Expected**: "Google hasn't verified this app". Click **Advanced** >
-   **Go to Finance Bot (unsafe)** > **Continue**. The terminal prints
-   `credentials saved`. Then remove the test token:
+   **Go to Finance Bot (unsafe)**. The next screen has one checkbox per
+   scope: **tick both** (or "Select all"), then **Continue**. The terminal
+   prints `credentials saved` with both scopes. Then remove the test token:
    `rm data/google/consent_test.json`
 3. **If you get "Access blocked" instead**: stop and report it. That is the
    plan's fallback case (plan 4.2, plan B), decided together before Phase 1.

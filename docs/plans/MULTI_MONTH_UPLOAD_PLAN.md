@@ -282,7 +282,15 @@ index in 4.4 is authoritative rather than a cache.
 - `get_gspread_client()`, `get_sheets_service()` and `get_drive_service()`
   share those credentials.
 - `scripts/google_login.py`: installed-app local-server flow on the
-  workstation using `GOOGLE_OAUTH_CLIENT_PATH` (`data/google/oauth_client.json`),
+  workstation, `run_local_server(host="127.0.0.1", port=0, open_browser=False)`
+  — the library default port 8080 is taken on the workstation, WSL cannot
+  open the Windows browser, and the first consent attempt on `localhost`
+  in a signed-in browser failed with `invalid_request` (Phase 0 consent test,
+  2026-09-25) — using `GOOGLE_OAUTH_CLIENT_PATH` (`data/google/oauth_client.json`).
+  Google's consent screen is **granular** (one checkbox per scope), so the
+  script refuses to save a token whose granted scopes are not exactly
+  `spreadsheets` + `drive.file` and says which box was left unticked;
+  `get_credentials()` makes the same check on load,
   writes the token with mode `0600`, prints the `scp` command for the Pi and
   the reminder that the OAuth app must be **In production** (in *Testing*
   Google expires refresh tokens after 7 days).
@@ -1681,6 +1689,13 @@ nothing from Phase 1 and can run in parallel with it.
   label existed, and it is the first month the backlog writes into. One text
   cell per sheet (`Summary!H35`); the receiving `SUMIF` and the total already
   exist (4.9), so nothing else changes.
+- Done 2026-09-25 (user): income placeholder applied to the template and
+  01-06/2026; OAuth app `Finance Bot` External, **In production**, scopes
+  `spreadsheets` + `drive.file` only, Desktop client at
+  `data/google/oauth_client.json`; consent test passed (unverified warning,
+  both scopes granted). **Plan A holds; Phase 1 is unblocked.** Branding
+  verification was attempted and failed on domain ownership and privacy
+  policy content; it is not needed and was left open.
 - User: Google Cloud project `asnexport` → OAuth consent screen: External,
   scopes **`spreadsheets` and `drive.file` only** — if the console offers to
   add any other `drive.*` scope, decline it; they are restricted and cost a
