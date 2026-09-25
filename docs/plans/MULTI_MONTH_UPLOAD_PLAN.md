@@ -1783,6 +1783,61 @@ sort, undo, delete.
 confirm the backlog walk of 4.3 against the fixture; time one 40-row AI chunk
 on the Pi and set `AI_RUN_MAX_MINUTES` from it.
 
+- Done 2026-09-25 (me), 307 tests green: `finance_core/periods.py` (pure),
+  `finance_core/period_state.py` (the anchor file and `split_settings()`),
+  the six `PERIOD_*` keys in `config_settings.example.py`, `tests/test_periods.py`
+  (every 4.3 rule and every section 5 scenario), `tests/test_period_state.py`,
+  `tests/test_periods_fixture.py`. A mutation pass (chained clustering, no
+  anchor filter, split-day, window and step off-by-ones, same-day rows, no
+  rule 7, an advance that drops history) is caught by at least one test each.
+  `undo_upload.py` now restores the anchor through `period_state.write_state`.
+  **Backlog walk confirmed**: the synthetic replay of the real 2026 spans
+  (anchor 24-04 → `05/2026`, export 22-05 to 21-09) yields `05/2026` leading,
+  then `06/2026` to `09/2026` with no warning; the fixture yields boundaries
+  24-06, 24-07, 24-08, 24-09 and periods `06/2026` (leading, from 12-06) to
+  `10/2026`, with and without an anchor, all 390 rows placed; re-splitting
+  the fixture under the advanced anchor reproduces every row's label and
+  opens no period. Decisions taken where the plan left room:
+  - `split_into_periods` returns a `SplitResult` (`periods`, `boundaries`,
+    `warnings`, `skipped_labels`) rather than a bare list, because the
+    no-anchor warning and the forced skipped months must reach the summary.
+    It takes `step_days` explicitly. Rows are copied with `period_label`; the
+    input is not modified.
+  - One `Period` per label, chronological. A label can repeat only in a
+    forced split (the December bonus); those rows share a sheet and merge.
+  - Rule 3 filters candidates inside the anchor's `min_days` window **before**
+    clustering, so a spurious candidate 15 days after the anchor cannot
+    absorb the real boundary at day 30.
+  - With a boundary in the upload, every row from `anchor.boundary` up to it
+    gets `anchor.label`, even past `max_days`: the boundary proves where the
+    anchor's period ends, and a missing month shows up as a rule 7 skip. The
+    `max_days` window applies only when the upload has no boundary (rule 5).
+  - Without an anchor, a leading remainder or a marker-less span reaching
+    `max_days` or more from its reference aborts, unforceably, naming
+    `seed_state.py`. The plan only gave the label for that case; this closes
+    the path where a long export before seeding lands in one month.
+  - `advance_anchor` pushes **every** superseded boundary onto `history`, not
+    only the old anchor; otherwise a four-boundary run leaves a gap that
+    later labels a June row as `05/2026`.
+  - Markers match case-sensitively, as written, against the counterparty and
+    each remittance line (section 11's `IGNORECASE` question applies to
+    sheet text, not the raw CSV).
+  - The state file is `{"anchor": {"boundary": "DD-MM-YYYY", "label"},
+    "history": [[date, label], …]}`, newest first; no file means no anchor.
+  - Two section 5 scenarios contradict the plan's own constants and were
+    re-cut to test the property they name: "candidates 24, 25 and 43 days
+    after a boundary" cannot open a third cluster with `min_days = 20`
+    (43 − 24 = 19), so non-chaining is tested with 0, 15, 30; and "a row 32
+    days after the anchor is not given `anchor.label`" is false for a
+    marker-less row under `max_days = 35`, so the test pins the edge (day 34
+    is the anchor's, day 35 aborts) plus a row 32 days out after a boundary
+    at day 30. Rule 7's closed-period length check cannot fire through the
+    public function, since rules 2 and 3 already keep boundaries `min_days`
+    apart; it is kept as a guard and tested directly.
+  - `scripts/time_ai_chunk.py` times one chunk on the Pi's current image
+    (its AI code equals this branch's), printing counts and seconds only.
+    **Open**: running it on the Pi and setting `AI_RUN_MAX_MINUTES`.
+
 **Phase 3, pipeline and UI**, in this order:
 
 1. Move `apply_categorization_rules` to `finance_core/categorization_rules.py`,
