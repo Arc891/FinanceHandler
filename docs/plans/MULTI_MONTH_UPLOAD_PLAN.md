@@ -1733,6 +1733,40 @@ assert the totals return), not merely that the placeholder labels exist —
 because this decides plan A versus plan B before anything else is built on it. Then write,
 sort, undo, delete.
 
+- Done 2026-09-25 (me), code and fakes, 236 tests green: `google_auth.py`,
+  `google_retry.py`, `scripts/google_login.py`, `row_tuple.py`,
+  `sheet_writer.py`, `sheet_registry.py`, `ledger.py`, `run_state.py`
+  (read-only appending guard), `scripts/undo_upload.py`,
+  `scripts/sandbox_check.py`; `google_sheets.py` import change and dead pair
+  deleted; `csv_helper` stops rewriting uploads and carries `remittance_raw`.
+  Decisions taken where the plan left room:
+  - The registry talks to Google through a `GoogleWorkbooks` adapter; tests
+    fake the adapter (`FakeWorkbooks`) rather than the Sheets/Drive client
+    chain. The adapter itself is exercised only by the live sandbox run.
+  - `with_retry` is one attempt plus three retries (5/15/45 s).
+  - The fidelity check also asserts the tabs are exactly `Summary`,
+    `Transactions`: a retried `copyTo` whose first attempt landed would
+    otherwise leave a stray `Copy of …` tab. A retried
+    `spreadsheets.create` in the same situation leaves an empty orphan
+    workbook in My Drive root; accepted, it is visible and harmless.
+  - `L8` is copied as the previous `E17`'s unformatted number, written
+    `RAW`, rather than as its rendered string.
+  - `compact_block` blanks the tail in the same single `RAW` update (empty
+    strings) rather than a separate `batch_clear`, so a block is never left
+    half-compacted with a duplicated tail.
+  - The ledger drops `written_row`: it is unknowable before the write, and
+    the audit carries the rows by content.
+  - `undo_upload.py` also drops the run's dedup records (`forget_run`),
+    otherwise a re-upload after an undo would skip every undone row. It
+    refuses outright while any run has an `appending` period on a sheet it
+    would touch, and has `--dry-run`.
+  - The normalised copy is `<name>.normalised.csv` beside the upload, so the
+    Phase 3 pipeline must iterate the run's `files` list, never glob `*.csv`.
+  - Open: `USER_ENTERED` also parses descriptions, so one that looks like a
+    date or number would be stored as one and fail its `RowTuple` match on
+    reconciliation. `sandbox_check.py` probes it with `"2-3"`.
+- Next: the user runs `scripts/google_login.py`, then `sandbox_check.py`.
+
 **Phase 2, periods**: `periods.py`, config keys, tests, fixture-driven;
 confirm the backlog walk of 4.3 against the fixture; time one 40-row AI chunk
 on the Pi and set `AI_RUN_MAX_MINUTES` from it.
