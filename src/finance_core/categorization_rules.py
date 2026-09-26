@@ -1,8 +1,8 @@
 """
 Regex categorisation rules: the first pass of the categorisation engine.
 
-Moved verbatim from finance_core/ui/transaction_prompt.py so the regex path
-no longer depends on the Discord review UI. Pure: `re` plus the rule tables
+Moved verbatim out of the Discord review UI (removed in Phase 3) so the
+regex path no longer depends on it. Pure: `re` plus the rule tables
 in constants.py.
 """
 

@@ -2066,6 +2066,23 @@ measures them on months where the right answer is already known.
     bank text, and `/cancel` and `/months register` change state.
   - (me) `/months register` takes `force`, since the stale-sheet error
     tells the user to re-point a label with it.
+- Done 2026-09-26 (me), step 5, 513 tests green:
+  - Deleted `ui/transaction_prompt.py`, `ui/discord_notifier.py`,
+    `ui/cached_transactions_view.py` and with them the now-empty `ui`
+    package, plus `pending_transactions.py`, `background_upload.py`,
+    `session_management.py` and both `DUMMY_CACHED` members
+    (`_NOT_FOR_AI` keeps only `NOG_IN_TEDELEN`).
+  - The exit grep over `src` is empty. Three docstrings that named a
+    deleted module as the origin of moved code were reworded so that the
+    literal grep passes. `tests/test_review_ui_removed.py` keeps the check
+    (code lines only), plus the module imports and the enum members.
+  - `data/sessions/` is gitignored runtime data, so no commit can remove
+    it. The workstation copy is left for the user; the Pi's goes with
+    Phase 4 step 3's check that `data/` holds no live pending or cached
+    items.
+  - Still broken until Phase 4 step 1, as planned (the exit check is
+    scoped to `src`): `scripts/retry_failed_transactions.py` and
+    `scripts/recategorize_pending.py` import deleted modules.
 - **Answer key: the 2024 and 2025 sheets.** The user checked these by hand.
   2026 is mostly AI-written, so scoring against it would largely measure the
   model against itself; it is excluded. The 2024/2025 sheets are not in

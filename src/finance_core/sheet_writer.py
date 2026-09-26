@@ -1,7 +1,7 @@
 """
 Append, read, compact, sort and remove rows in a month's Transactions tab (plan 4.5).
 
-Replaces the row-position machinery of background_upload.py: the next free row
+Replaces the old upload queue's remembered row positions: the next free row
 is always read from the sheet, never remembered.
 
 A block is one of the two four-column regions (expenses B:E, income G:J) whose

@@ -1,7 +1,7 @@
 """
 The user's progress thread, Approvals-<name> (plan 4.1).
 
-Moved unchanged from ui/discord_notifier.py, which step 5 of Phase 3 deletes.
+Moved unchanged out of the Discord review UI, which Phase 3 removed.
 The thread keeps its name; it is now a progress log, not an approval surface.
 """
 

@@ -24,10 +24,7 @@ logger = logging.getLogger(__name__)
 
 # Never offered to the model: a confident placeholder answer would be written
 # flagged but missing from the flagged count (plan 4.9).
-_NOT_FOR_AI = {
-    ExpenseCategory.DUMMY_CACHED, ExpenseCategory.NOG_IN_TEDELEN,
-    IncomeCategory.DUMMY_CACHED, IncomeCategory.NOG_IN_TEDELEN,
-}
+_NOT_FOR_AI = {ExpenseCategory.NOG_IN_TEDELEN, IncomeCategory.NOG_IN_TEDELEN}
 
 
 def ai_category_options() -> Tuple[Dict[str, str], Dict[str, str]]:
