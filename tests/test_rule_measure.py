@@ -73,11 +73,19 @@ def test_a_local_rule_is_named_by_its_group_id_and_line():
     assert first_matching_rule(tx(name=SECRET_NAME), rules).label == "local N07 line 2"
 
 
+def test_the_converters_source_shows_its_group_id():
+    """apply_rule_draft.py writes `N07 out`: the id is the first word."""
+    rules = local(("out", r"\bjolanda\b", "-", "Cadeautjes", "-", "Cadeau", "N07 out"))
+    assert first_matching_rule(tx(name=SECRET_NAME), rules).label == "local N07 line 1"
+
+
 def test_a_source_that_is_no_group_id_stays_out_of_the_name():
     """The source column is free text the user may edit: only an id is shown."""
     rules = local(("out", r"\bjolanda\b", "-", "Cadeautjes", "-", "Cadeau", "Jolanda"))
     assert first_matching_rule(tx(name=SECRET_NAME), rules).label == "local line 1"
     rules = local(("out", r"\bjolanda\b", "-", "Cadeautjes", "-", "Cadeau"))
+    assert first_matching_rule(tx(name=SECRET_NAME), rules).label == "local line 1"
+    rules = local(("out", r"\bjolanda\b", "-", "Cadeautjes", "-", "Cadeau", "Jolanda N07"))
     assert first_matching_rule(tx(name=SECRET_NAME), rules).label == "local line 1"
 
 
@@ -201,7 +209,8 @@ def test_the_local_rules_summary_is_counts_only():
     assert cov["local"] == dict(loaded=3, caught=5, correct=4, marked=2)
     out = "\n".join(rc.format_rule_coverage(cov))
     assert "local rules: 3 loaded; 5 rows caught (4 correct), 2 of them marked" in out
-    assert "'local N07 line 1': 3" in out
+    assert "'local N07 line 1': 3/3" in out
+    assert "'local N02 line 2' (marked): 1/2" in out
     for secret in (SECRET_NAME, "Vermeulen", "jolanda", "kruidvat", "Kruidvat", "eigen", "Cadeau\t",
                    "12.34", "15.00"):
         assert secret not in out

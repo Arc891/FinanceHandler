@@ -54,9 +54,11 @@ class LocalRule(NamedTuple):
 
     @property
     def label(self) -> str:
-        """How a report names the rule: `local N07 line 12`. The source is
-        shown only when it has a group id's shape, since it is free text."""
-        shown = f" {self.source}" if self.source and GROUP_ID.match(self.source) else ""
+        """How a report names the rule: `local N07 line 12`. The source's
+        first word (the converter writes `N07 out`) is shown only when it has
+        a group id's shape, since the column is free text."""
+        first = self.source.split()[0] if self.source else ""
+        shown = f" {first}" if GROUP_ID.match(first) else ""
         return f"local{shown} line {self.line}"
 
 

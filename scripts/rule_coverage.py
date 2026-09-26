@@ -656,7 +656,8 @@ def rule_coverage(records, truths, txs, spaarpot_names=(), since=None, local_rul
         if rule is None:
             uncovered.append((rec, row["truth"]))
             continue
-        hit = rules.setdefault(rule.label or rule.pattern, dict(hits=0, correct=0, wrong=Counter(), years={}))
+        hit = rules.setdefault(rule.label or rule.pattern, dict(hits=0, correct=0, wrong=Counter(), years={},
+                                                                marked=rule.marked))
         year = hit["years"].setdefault(rec.label[3:], [0, 0])
         hit["hits"] += 1
         year[0] += 1
@@ -742,7 +743,8 @@ def format_rule_coverage(cov):
     for pattern, h in sorted(cov["rules"].items(), key=lambda kv: (kv[1]["correct"] - kv[1]["hits"], kv[0])):
         shown = pattern if len(pattern) <= PATTERN_MAX else pattern[:PATTERN_MAX] + "..."
         wrong = f"; wrong: {_share(h['wrong'], h['hits'] - h['correct'])}" if h["wrong"] else ""
-        lines.append(f"  {shown!r}: {_pct(h['hits'], h['correct'])} [{_years(h['years'])}]{wrong}")
+        tag = " (marked)" if h.get("marked") else ""
+        lines.append(f"  {shown!r}{tag}: {_pct(h['hits'], h['correct'])} [{_years(h['years'])}]{wrong}")
 
     lines.append("not covered by any rule, per true category:")
     for cat, n in cov["uncovered"].most_common():
