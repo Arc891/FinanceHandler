@@ -15,10 +15,16 @@ Runs the regex pass alone over the hand-checked months and reports:
   months (keep, split on one feature, review, gd or drop), what each would
   write there, and suggested roles for the household's own accounts;
 - a projection over those months of the rows per month that would still
-  need the user, today and with the proposals.
+  need the user, today and with the proposals;
+- with local rules given (the household's own file), each one's precision
+  under its name (`local N07 line 12`), and a marked one's rows counted as
+  rows that need the user; without them, no local rules at all, so the group
+  ids match the draft the local rules were chosen from;
+- for amount cuts asked for (`N07` at 100, 125, 150), per cut what a rule
+  "from this amount up" would write over the group's rows in the window.
 
-The printed report holds counts, category and feature names, rule patterns
-(which are code) and anonymous group ids only. Names, IBANs, keywords and
+The printed report holds counts, category and feature names, the patterns of
+the rules in constants.py (which are code) and anonymous group ids only. Names, IBANs, keywords and
 amount thresholds go to files only the user reads (0600). Nothing is sent to
 the AI.
 """
@@ -563,6 +569,10 @@ def _projection(records, fired, rows, drafts, window):
     for rec, rule, row in zip(records, fired, rows):
         if rec.label not in inside:
             continue
+        if rule and rule.marked:
+            for c in (today, proposed):
+                c["marked"] += 1
+            continue
         if rule:
             for c in (today, proposed):
                 c["rules"] += 1
@@ -594,14 +604,47 @@ def _watch(pairs, fired, rows, drafts):
                 marked_other=sum(d["rows"] - d["truths"][GOEIE_DOELEN] for d in proposed))
 
 
-def rule_coverage(records, truths, txs, spaarpot_names=(), since=None):
+def _local_summary(fired, rows, local_rules):
+    if local_rules is None:
+        return None
+    caught = [(rule, row) for rule, row in zip(fired, rows) if rule and rule.label]
+    return dict(loaded=len(local_rules), caught=len(caught),
+                correct=sum(row["correct"] for _, row in caught),
+                marked=sum(rule.marked for rule, _ in caught))
+
+
+def _cuts(cuts, groups, window):
+    """{group id: rows in the window and, per cut, the categories from it up and below it}."""
+    by_id = {g["id"]: g for g in groups}
+    inside = set(window)
+    out = {}
+    for gid, amounts in (cuts or {}).items():
+        group = by_id.get(gid)
+        if group is None:
+            out[gid] = None
+            continue
+        members = [(rec, truth) for rec, truth in group["members"] if rec.label in inside]
+        per_cut = []
+        for cut in amounts:
+            above, below = Counter(), Counter()
+            for rec, truth in members:
+                amount = tx_amount(rec.tx)
+                (above if amount is not None and amount >= cut else below)[truth] += 1
+            per_cut.append(dict(cut=cut, above=above, below=below))
+        out[gid] = dict(rows=len(members), truths=Counter(t for _, t in members), cuts=per_cut)
+    return out
+
+
+def rule_coverage(records, truths, txs, spaarpot_names=(), since=None, local_rules=None, cuts=None):
     """The regex pass alone, scored, plus what the uncovered rows have in common.
 
     Proposals rest on the sheet months from `since` ("MM/YYYY"), or the last
-    RECENT_MONTHS without it.
+    RECENT_MONTHS without it. `local_rules` are the household's rules to run
+    after the ones in constants.py; None runs none (never the configured
+    file). `cuts` is {group id: [amount, ...]}.
     """
     from finance_core.categorization_rules import first_matching_rule
-    fired = [first_matching_rule(r.tx) for r in records]
+    fired = [first_matching_rule(r.tx, [] if local_rules is None else local_rules) for r in records]
     results = [SimpleNamespace(category=rule.category.value, method="regex", confidence=1.0)
                if rule else None for rule in fired]
     rows = score(records, truths, results)
@@ -613,7 +656,7 @@ def rule_coverage(records, truths, txs, spaarpot_names=(), since=None):
         if rule is None:
             uncovered.append((rec, row["truth"]))
             continue
-        hit = rules.setdefault(rule.pattern, dict(hits=0, correct=0, wrong=Counter(), years={}))
+        hit = rules.setdefault(rule.label or rule.pattern, dict(hits=0, correct=0, wrong=Counter(), years={}))
         year = hit["years"].setdefault(rec.label[3:], [0, 0])
         hit["hits"] += 1
         year[0] += 1
@@ -638,6 +681,7 @@ def rule_coverage(records, truths, txs, spaarpot_names=(), since=None):
     truth_of = {id(tx): truth for tx, truth in pairs}
     savings = savings_accounts(pairs)
     name_groups = _groups(uncovered, merchant_key, "N")
+    iban_groups = _groups(uncovered, _iban, "I")
     window = _window(records, since)
     drafts = _draft(uncovered, name_groups, window)
     return dict(
@@ -646,7 +690,7 @@ def rule_coverage(records, truths, txs, spaarpot_names=(), since=None):
         features=feature_probe(pairs),
         uncovered=Counter(t for _, t in uncovered),
         name_groups=name_groups,
-        iban_groups=_groups(uncovered, _iban, "I"),
+        iban_groups=iban_groups,
         mirrors=mirrors,
         savings=savings,
         links={(w, k): find_links(txs, truth_of, savings, w, k)
@@ -656,6 +700,8 @@ def rule_coverage(records, truths, txs, spaarpot_names=(), since=None):
         draft=drafts,
         projection=_projection(records, fired, rows, drafts, window),
         watch=_watch(pairs, fired, rows, drafts),
+        local=_local_summary(fired, rows, local_rules),
+        cuts=_cuts(cuts, name_groups + iban_groups, window),
     )
 
 
@@ -687,7 +733,12 @@ def format_rule_coverage(cov):
         n = sum(truths.values())
         lines.append(f"  {code}: {n} rows: {_share(truths, n)}")
 
-    lines.append("rules that fired (pattern: hits, correct [per year]; true category when wrong):")
+    local = cov.get("local")
+    if local:
+        lines.append(f"local rules: {local['loaded']} loaded; {local['caught']} rows caught "
+                     f"({local['correct']} correct), {local['marked']} of them marked")
+    lines.append("rules that fired (pattern, or a local rule's name: hits, correct [per year]; "
+                 "true category when wrong):")
     for pattern, h in sorted(cov["rules"].items(), key=lambda kv: (kv[1]["correct"] - kv[1]["hits"], kv[0])):
         shown = pattern if len(pattern) <= PATTERN_MAX else pattern[:PATTERN_MAX] + "..."
         wrong = f"; wrong: {_share(h['wrong'], h['hits'] - h['correct'])}" if h["wrong"] else ""
@@ -772,6 +823,23 @@ def format_rule_coverage(cov):
                      f"{s['ambiguous']} ambiguous, {s['conflict']} in conflict, {s['none']} unmatched; "
                      f"Uit spaarpotje explained {s['explained']}/{s['targets']}; "
                      f"wrong claims {wrong}{detail}; unscored claims {s['unscored']}")
+
+    if cov.get("cuts"):
+        lines.append("amount cuts over the window (from the cut up: its top category; below: the AI):")
+    for gid, c in (cov.get("cuts") or {}).items():
+        if c is None:
+            lines.append(f"  {gid}: no such group")
+            continue
+        lines.append(f"  {gid}: {c['rows']} rows in the window ({_share(c['truths'], c['rows'])})")
+        for k in c["cuts"]:
+            n_above, n_below = sum(k["above"].values()), sum(k["below"].values())
+            if n_above:
+                top = _top(k["above"])
+                above = f"{_name(top)} {k['above'][top]}/{n_above} ({100 * k['above'][top] / n_above:.0f}%)"
+            else:
+                above = "-"
+            below = _share(k["below"], n_below) if n_below else "-"
+            lines.append(f"    from {k['cut']:g}: {n_above} rows, {above}; below: {n_below} rows: {below}")
 
     roles = Counter(r["role"] for r in cov["accounts"].values())
     lines.append(f"account roles suggested: {roles['savings']} savings, {roles['personal']} personal "

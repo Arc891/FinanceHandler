@@ -39,6 +39,7 @@ class Rule(NamedTuple):
     template: str
     category: Enum
     marked: bool = False
+    label: Optional[str] = None     # a local rule's name in reports; None for constants.py
 
 
 def search_text(transaction: Dict[str, Any]) -> str:
@@ -87,7 +88,7 @@ def first_matching_rule(transaction: Dict[str, Any], local_rules=None) -> Option
         if match and rule.when(transaction):
             if rule.category is None:
                 return None
-            return Rule(rule.pattern, match, rule.description, rule.category, rule.marked)
+            return Rule(rule.pattern, match, rule.description, rule.category, rule.marked, rule.label)
 
     return None
 

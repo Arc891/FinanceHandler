@@ -2473,6 +2473,25 @@ measures them on months where the right answer is already known.
       by group id and writes nothing then, prints counts only, writes
       0600. A round-trip test checks the converted rules decide every
       synthetic row as the draft proposed.
+  - Done 2026-09-26 (me), step 3 tooling, 727 tests green (measuring
+    still to run):
+    - `eval_categoriser.py --local-rules PATH` runs the household's rules
+      in the regex analysis and in the AI run (the engine takes a fixed
+      list; the bot still reads the configured file on every call). A
+      missing file or a bad line stops the run with a plain message.
+      Without the flag no local rules run at all, never the configured
+      file, so the group ids stay those of the draft the rules came from.
+    - `--account-roles PATH`: a private file, one account per line (role,
+      then IBAN), since the image's config has no `ACCOUNT_ROLES`; the
+      roles reach the conditional rules, `role=` conditions and pot hints.
+      Only the count per role is printed.
+    - A local rule is printed as `local N07 line 12` (its source column
+      when it has a group id's shape), never by its pattern. A marked
+      rule's rows count as rows that need the user in the projection.
+    - `--amount-cuts N07=100,125,150` (with `--rules`): per cut, the
+      group's rows in the window from the cut up (top category and its
+      share) and below it (their categories). Run it without
+      `--local-rules` so the ids match draft 7.
   - Holdout: 2026 is not looked at while choosing rules. Once the rules
     are in, the 2026 months already categorised by hand (January to
     21 May) score them, with an export of those months (`--years 2026`).

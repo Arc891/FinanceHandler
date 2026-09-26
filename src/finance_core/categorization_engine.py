@@ -61,7 +61,8 @@ class CategorizationEngine:
         self,
         ai_categorizer: ClaudeCategorizer | None = None,
         ai_confidence_threshold: float = 0.75,
-        ai_enabled: bool = False
+        ai_enabled: bool = False,
+        local_rules=None
     ):
         """
         Initialize the categorization engine.
@@ -70,10 +71,13 @@ class CategorizationEngine:
             ai_categorizer: Optional ClaudeCategorizer instance
             ai_confidence_threshold: Minimum confidence for auto-approval (0.0-1.0)
             ai_enabled: Whether AI categorization is enabled
+            local_rules: The local rules to use; None reads the configured
+                file on every call (the bot), a list fixes them (the eval)
         """
         self.ai_categorizer = ai_categorizer
         self.ai_confidence_threshold = ai_confidence_threshold
         self.ai_enabled = ai_enabled
+        self.local_rules = local_rules
 
         if self.ai_enabled and not self.ai_categorizer:
             logger.warning(
@@ -103,7 +107,7 @@ class CategorizationEngine:
             CategorizationResult with category, description, confidence, and method
         """
         # Step 1: Try the rules
-        matched = self._apply_regex_rules(transaction, default_local_rules())
+        matched = self._apply_regex_rules(transaction, self._local_rules())
         if matched:
             return matched
 
@@ -119,6 +123,9 @@ class CategorizationEngine:
             confidence=0.0,
             method='none'
         )
+
+    def _local_rules(self):
+        return default_local_rules() if self.local_rules is None else self.local_rules
 
     def _apply_regex_rules(
         self, transaction: Dict[str, Any], local_rules
@@ -239,7 +246,7 @@ class CategorizationEngine:
         Raises LocalRulesError, before any work, when the local rules file
         has a bad line.
         """
-        local_rules = default_local_rules()
+        local_rules = self._local_rules()
         results: list[Optional[CategorizationResult]] = [None] * len(transactions)
 
         # Pass 1: regex on all transactions

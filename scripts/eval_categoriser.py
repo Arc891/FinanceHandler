@@ -37,6 +37,13 @@ image's config and service account are used as they are):
         --src /tmp/eval/src --rules --names-out /tmp/eval/rule-names.tsv \\
         --draft-out /tmp/eval/rule-draft.txt /tmp/eval/*.csv
     # (rule_coverage.py must sit next to this script: scp it along.)
+    # With the household's own rules and account roles, as the bot would run
+    # them (both files private, 0600, readable by the container's user); add
+    # --amount-cuts N07=100,125,150 on a run WITHOUT --local-rules, so the
+    # group ids are the draft's:
+    docker exec finance-automation-bot python /tmp/eval/eval_categoriser.py \\
+        --src /tmp/eval/src --rules --local-rules /tmp/eval/local_rules.tsv \\
+        --account-roles /tmp/eval/account_roles.txt /tmp/eval/*.csv
     # afterwards, remove the exports from both places
     docker exec finance-automation-bot rm -rf /tmp/eval
     rm -rf /tmp/eval
@@ -150,10 +157,18 @@ def install_quiet_logging() -> LogCounter:
     return counter
 
 
+class InputError(Exception):
+    """A file or argument the run cannot use. The message is written here,
+    never taken from row content, so it is printed."""
+
+
 def guarded(fn, debug=False):
     try:
         result = fn()
         return 0 if result is None else result
+    except InputError as exc:
+        print(f"stopped: {exc}")
+        return 2
     except Exception as exc:                     # noqa: BLE001 - the point
         if debug:
             raise
@@ -532,6 +547,69 @@ def parse_month(arg):
     return arg
 
 
+GROUP_ARG = re.compile(r"^[A-Z]\d{1,4}$")
+IBAN_SHAPE = re.compile(r"^[A-Z]{2}\d{2}[A-Z0-9]{8,30}$")
+
+
+def parse_cuts(arg):
+    """`N07=100,125,150` -> ("N07", [100.0, 125.0, 150.0])."""
+    gid, _, amounts = arg.partition("=")
+    try:
+        values = [float(a) for a in amounts.split(",")]
+    except ValueError:
+        values = None
+    if not GROUP_ARG.match(gid) or not values or any(v <= 0 for v in values):
+        raise argparse.ArgumentTypeError("expected a group id and amounts, e.g. N07=100,125,150")
+    return gid, values
+
+
+def load_account_roles(path):
+    """{role: [iban, ...]} from a private file: one account per line, the role
+    first (savings, partner_personal, user_personal), then the IBAN, spaces
+    allowed. Errors name the line, never its text."""
+    from finance_core.tx_features import ROLES, normalise_iban
+    try:
+        with open(path, encoding="utf-8") as f:
+            lines = f.read().splitlines()
+    except FileNotFoundError:
+        raise InputError("the account roles file does not exist") from None
+    roles, seen = {}, set()
+    for n, line in enumerate(lines, 1):
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        role, _, rest = line.strip().partition(" ")
+        if role not in ROLES:
+            raise InputError(f"account roles line {n}: not a known role ({', '.join(ROLES)})")
+        iban = normalise_iban(rest)
+        if not IBAN_SHAPE.match(iban):
+            raise InputError(f"account roles line {n}: no IBAN after the role")
+        if iban in seen:
+            raise InputError(f"account roles line {n}: an account given twice")
+        seen.add(iban)
+        roles.setdefault(role, []).append(iban)
+    return roles
+
+
+def load_rules_file(path):
+    from finance_core.local_rules import LocalRulesError, load_local_rules
+    if not os.path.exists(path):
+        raise InputError("the local rules file does not exist")
+    try:
+        return load_local_rules(path)
+    except LocalRulesError as exc:          # names the line and the problem only
+        raise InputError(str(exc)) from None
+
+
+def build_engine(model, local_rules, make_ai=None):
+    """The engine as production builds it, with the eval's local rules."""
+    from finance_core.categorization_engine import CategorizationEngine
+    if make_ai is None:
+        from automation.ai_categorizer import ClaudeCategorizer
+        make_ai = lambda m: ClaudeCategorizer(model=m)          # noqa: E731
+    return CategorizationEngine(ai_categorizer=make_ai(model), ai_enabled=True,
+                                local_rules=local_rules)
+
+
 def load_exports(paths):
     from finance_core.csv_helper import load_transactions_from_csv
     from finance_core.ledger import collapse_within_upload
@@ -567,6 +645,16 @@ def run(args, counter):
     valid = {"expenses": set(expense), "income": set(income)}
     mapping = dict(args.map or [])
 
+    local_rules = load_rules_file(args.local_rules) if args.local_rules else []
+    if args.local_rules:
+        say(f"local rules: {len(local_rules)} loaded")
+    if args.account_roles:
+        from finance_core.tx_features import ROLES, use_account_roles
+        roles = load_account_roles(args.account_roles)
+        use_account_roles(roles)
+        say("account roles: " + ", ".join(f"{r} {len(roles.get(r, []))}" for r in ROLES)
+            + " (numbers not shown)")
+
     txs, collapsed = load_exports(args.csv)
     gc = service_account_client(args.credentials)
     if args.sheet:
@@ -584,7 +672,9 @@ def run(args, counter):
         say(line)
     if args.rules:
         import rule_coverage as rc
-        cov = rc.rule_coverage(m.records, m.truths, txs, rc.spaarpot_names(), since=args.recent_from)
+        cov = rc.rule_coverage(m.records, m.truths, txs, rc.spaarpot_names(), since=args.recent_from,
+                               local_rules=local_rules if args.local_rules else None,
+                               cuts=dict(args.amount_cuts or []))
         say("")
         for line in rc.format_rule_coverage(cov):
             say(line)
@@ -600,10 +690,7 @@ def run(args, counter):
         say("dry run: nothing sent to the AI" if args.dry_run else "no rows to score")
         return 0
 
-    from automation.ai_categorizer import ClaudeCategorizer
-    from finance_core.categorization_engine import CategorizationEngine
-    engine = CategorizationEngine(ai_categorizer=ClaudeCategorizer(model=args.model),
-                                  ai_enabled=True)
+    engine = build_engine(args.model, local_rules)
     runs = []
     for n in range(1, args.runs + 1):
         say(f"\nrun {n}/{args.runs}, model {args.model}:")
@@ -649,9 +736,17 @@ def main(argv=None) -> int:
                              "(default: the last 12)")
     parser.add_argument("--draft-out", metavar="PATH",
                         help="with --rules: write draft rules, splits and account roles here (0600)")
+    parser.add_argument("--local-rules", metavar="PATH",
+                        help="the household's rules file (private); without it no local rules run")
+    parser.add_argument("--account-roles", metavar="PATH",
+                        help="private file, one account per line: role, then IBAN")
+    parser.add_argument("--amount-cuts", action="append", type=parse_cuts, metavar="ID=A,B,..",
+                        help="with --rules: per cut, what a group's rows from it up and below it are")
     parser.add_argument("--debug", action="store_true",
                         help="show tracebacks; may print row content")
     args = parser.parse_args(argv)
+    if args.amount_cuts and not args.rules:
+        parser.error("--amount-cuts works with --rules only")
     if args.src:
         sys.path.insert(0, args.src)
     counter = install_quiet_logging()

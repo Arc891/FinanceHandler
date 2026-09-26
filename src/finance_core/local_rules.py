@@ -16,7 +16,8 @@ per line, tab-separated, `#` lines and blank lines skipped:
   leave the row to the AI;
 - mark: `?` writes the category marked for the user to check, `-` plain;
 - description: what the sheet shows, `-` only on an `ai` line;
-- source: where the line came from (the draft's group id), not read.
+- source: where the line came from (the draft's group id); reports name
+  the rule by it and its line, never by its pattern.
 
 The rules run after the tables in constants.py, first match wins. A bad
 line stops the whole file with its line number and what is wrong, never its
@@ -33,6 +34,7 @@ from finance_core.rule_conditions import parse_when
 
 DEFAULT_PATH = "src/config/local_rules.tsv"
 AI = "ai"
+GROUP_ID = re.compile(r"^[A-Z]\d{1,4}$")
 
 
 class LocalRulesError(ValueError):
@@ -48,6 +50,14 @@ class LocalRule(NamedTuple):
     category: Optional[object]      # None on an `ai` line
     marked: bool
     description: Optional[str]
+    source: Optional[str] = None
+
+    @property
+    def label(self) -> str:
+        """How a report names the rule: `local N07 line 12`. The source is
+        shown only when it has a group id's shape, since it is free text."""
+        shown = f" {self.source}" if self.source and GROUP_ID.match(self.source) else ""
+        return f"local{shown} line {self.line}"
 
 
 def _category(name, direction):
@@ -62,6 +72,7 @@ def _rule(n, fields):
     if len(fields) < 6:
         raise ValueError("expected 6 columns (direction, pattern, when, category, mark, description)")
     direction, pattern, when, category, mark, description = (f.strip() for f in fields[:6])
+    source = fields[6].strip() if len(fields) > 6 and fields[6].strip() else None
     if direction not in ("in", "out"):
         raise ValueError("direction must be `in` or `out`")
     try:
@@ -73,7 +84,7 @@ def _rule(n, fields):
     except ValueError as exc:
         raise ValueError(f"the condition is not valid ({exc})") from None
     if category == AI:
-        return LocalRule(n, direction, pattern, regex, predicate, None, False, None)
+        return LocalRule(n, direction, pattern, regex, predicate, None, False, None, source)
     try:
         member = _category(category, direction)
     except ValueError as exc:
@@ -82,7 +93,7 @@ def _rule(n, fields):
         raise ValueError("the mark must be `?` or `-`")
     if description in ("", "-"):
         raise ValueError("a rule with a category needs a description")
-    return LocalRule(n, direction, pattern, regex, predicate, member, mark == "?", description)
+    return LocalRule(n, direction, pattern, regex, predicate, member, mark == "?", description, source)
 
 
 def parse_local_rules(text, name="local_rules.tsv") -> List[LocalRule]:

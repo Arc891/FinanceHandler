@@ -77,8 +77,21 @@ def normalise_iban(iban) -> str:
     return re.sub(r"\s+", "", iban or "").upper()
 
 
+ROLES = ("savings", "partner_personal", "user_personal")
+_given_roles = None
+
+
+def use_account_roles(roles):
+    """Answer `roles` instead of the config's (the eval reads them from a
+    private file); None goes back to the config."""
+    global _given_roles
+    _given_roles = roles
+
+
 def account_roles() -> dict:
     """ACCOUNT_ROLES from the local config: {role: [iban, ...]}; empty without one."""
+    if _given_roles is not None:
+        return _given_roles
     return setting("ACCOUNT_ROLES", {}) or {}
 
 
