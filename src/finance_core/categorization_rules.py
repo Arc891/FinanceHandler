@@ -21,16 +21,8 @@ class Rule(NamedTuple):
     category: Enum
 
 
-def first_matching_rule(transaction: Dict[str, Any]) -> Optional[Rule]:
-    """The first rule of the transaction's table that matches it, or None."""
-    # Determine transaction type
-    is_income = transaction.get("credit_debit_indicator") == "CRDT"
-    rules = CATEGORIZATION_RULES_INCOME if is_income else CATEGORIZATION_RULES_EXPENSE
-
-    if not rules:
-        return None
-
-    # Gather text to search from various transaction fields
+def search_text(transaction: Dict[str, Any]) -> str:
+    """The lower-cased text the rules search: counterparty names, then remittance."""
     search_texts = []
 
     # Add counterparty names
@@ -45,8 +37,19 @@ def first_matching_rule(transaction: Dict[str, Any]) -> Optional[Rule]:
         if item:
             search_texts.append(item.lower())
 
-    # Combine all text for searching
-    combined_text = " ".join(search_texts)
+    return " ".join(search_texts)
+
+
+def first_matching_rule(transaction: Dict[str, Any]) -> Optional[Rule]:
+    """The first rule of the transaction's table that matches it, or None."""
+    # Determine transaction type
+    is_income = transaction.get("credit_debit_indicator") == "CRDT"
+    rules = CATEGORIZATION_RULES_INCOME if is_income else CATEGORIZATION_RULES_EXPENSE
+
+    if not rules:
+        return None
+
+    combined_text = search_text(transaction)
 
     # Try each rule pattern
     for pattern, (description_template, category) in rules.items():

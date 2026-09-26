@@ -2314,6 +2314,38 @@ measures them on months where the right answer is already known.
     names and IBANs to a 0600 file for the user. `csv_helper` now keeps
     `counterparty_iban` (the AI prompt never includes it), and
     `categorization_rules.first_matching_rule` names the rule that fired.
+  - First real run (2026-09-26): the rules are 851 / 928 = 91.7 % right;
+    990 rows reach the AI. 29 name groups of 3+ rows are pure (290 rows);
+    N01 alone is 100 rows of Spaarrekening. Fixable rule errors:
+    `snack company|snackbar traay` 6 / 19 (really Boodschappen),
+    `SALARIS` catching Gemeente rows (the partner transfers her Gemeente
+    money from her personal account with the word "salaris"), `GEMEENTE`
+    catching Persoonlijke rekening. 29 / 87 uncovered Uit spaarpotje rows
+    have a one-to-one mirror; only 4 name a spaarpot.
+  - User facts (2026-09-26): a pot transfer always covers the exact sum of
+    one or more purchases; free money is a fixed monthly amount to each
+    personal account; the sending account decides Gemeente versus Salaris;
+    the snackbar is mostly dinner (Boodschappen). Rules at >= 80 % one
+    category are accepted; Cadeautjes at ordinary shops stays hand work.
+  - Done 2026-09-26 (me), second pass, 594 tests green: the analysis moves
+    to `scripts/rule_coverage.py` and adds rule precision per year; a probe
+    of what the rows hold (time of day in the text, true categories per
+    bank transaction code); per group whether its top category holds in
+    each year (`stable`, `shifts`, `one year`); per mixed group the single
+    feature that splits it best (direction, code, weekend, time of day,
+    recurring amount, amount, keyword, and year last, which means the
+    booking habit changed), scored leave-one-out against the top
+    category's share; pot transfer links (a transfer in from a savings
+    account links when exactly one set of up to 1-4 purchases within 7,
+    14 or 31 days sums to it; a purchase two transfers claim goes to
+    neither), scored as explained Uit spaarpotje rows against wrong
+    claims; draft rules for groups at >= 80 % that do not shift, with
+    word-bounded patterns tried on every uncovered row; and suggested
+    account roles (savings from Spaarrekening rows, personal from free
+    money rows). `--draft-out` writes the rules, the fitted splits and the
+    account numbers to a 0600 file. Findings: the leave-one-out majority
+    scores 0 on a balanced group, so it is no baseline; random synthetic
+    amounts made most 4-purchase links ambiguous, hence the per-size table.
   - Next: the user runs it on the Pi and picks rules from the pure groups;
     IBAN rules for own accounts (Spaarrekening, Persoonlijke rekening)
     would live in config, not in `constants.py`. Mixed groups show where

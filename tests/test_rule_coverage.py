@@ -13,6 +13,7 @@ import os
 import stat
 
 import eval_categoriser as ev
+import rule_coverage as rc
 from fakes import expense_tx, income_tx
 
 VALID = {"expenses": {"Boodschappen", "Cadeautjes", "Huishouden", "Uit spaarpotje"},
@@ -68,7 +69,7 @@ DATA = [
 def coverage():
     txs = [tx for tx, _ in DATA]
     m = ev.match_rows(txs, [r for _, r in DATA if r], VALID, {})
-    return ev.rule_coverage(m.records, m.truths, txs, spaarpot_names=["Vakantie"])
+    return rc.rule_coverage(m.records, m.truths, txs, spaarpot_names=["Vakantie"])
 
 
 def group(groups, key):
@@ -78,14 +79,14 @@ def group(groups, key):
 # ── the parts of the report ─────────────────────────────────────────────────
 
 def test_merchant_key_drops_branch_numbers_places_and_case():
-    keys = {ev.merchant_key(expense("01-01-2024", "1.00", n))
+    keys = {rc.merchant_key(expense("01-01-2024", "1.00", n))
             for n in ("Hema 1234 Utrecht", "HEMA 5678 AMSTERDAM", "hema")}
     assert keys == {"hema"}
-    assert ev.merchant_key(expense("01-01-2024", "1.00", "Bakker Bart 12 Driebergen")) == "bakker bart"
+    assert rc.merchant_key(expense("01-01-2024", "1.00", "Bakker Bart 12 Driebergen")) == "bakker bart"
 
 
 def test_merchant_key_falls_back_to_the_remittance_when_there_is_no_name():
-    assert ev.merchant_key(expense("01-01-2024", "1.00", "", rem="CCV*Kiosk 7 Station")) == "ccv kiosk"
+    assert rc.merchant_key(expense("01-01-2024", "1.00", "", rem="CCV*Kiosk 7 Station")) == "ccv kiosk"
 
 
 def test_each_rule_reports_hits_correct_and_what_it_got_wrong():
@@ -118,7 +119,7 @@ def test_uncovered_rows_group_by_iban_across_differing_names():
 
 
 def test_groups_below_the_minimum_size_are_left_out():
-    assert all(g["rows"] >= ev.GROUP_MIN for g in coverage()["name_groups"])
+    assert all(g["rows"] >= rc.GROUP_MIN for g in coverage()["name_groups"])
     assert "webshop" not in {g["key"] for g in coverage()["name_groups"]}
 
 
@@ -131,7 +132,7 @@ def test_a_mirror_is_an_opposite_row_of_the_same_amount_within_a_week():
 # ── privacy ─────────────────────────────────────────────────────────────────
 
 def test_the_printed_report_holds_no_names_ibans_amounts_or_dates():
-    out = "\n".join(ev.format_rule_coverage(coverage()))
+    out = "\n".join(rc.format_rule_coverage(coverage()))
     assert "N01" in out and "I01" in out and "Uit spaarpotje" in out
     for secret in (SECRET_NAME, "Vermeulen", SECRET_IBAN, "hema", "HEMA", "bakker",
                    "Webshop", "Vakantie", "45.00", "4.10", "2024-03", "10-03"):
@@ -140,7 +141,7 @@ def test_the_printed_report_holds_no_names_ibans_amounts_or_dates():
 
 def test_names_go_to_a_private_file(tmp_path):
     path = tmp_path / "names.tsv"
-    ev.write_names(coverage(), str(path))
+    rc.write_names(coverage(), str(path))
     text = path.read_text()
     assert "hema" in text and SECRET_IBAN in text and "N01\t" in text
     assert stat.S_IMODE(os.stat(path).st_mode) == 0o600
@@ -172,7 +173,7 @@ def test_rules_mode_sends_nothing_to_the_ai(monkeypatch, capsys, tmp_path):
     monkeypatch.setattr(ev, "load_exports", lambda paths: (txs, 0))
     monkeypatch.setattr(ev, "service_account_client", lambda p: FakeGc(blocks))
     monkeypatch.setattr(ev, "MIN_INTERVAL", 0.0)
-    monkeypatch.setattr(ev, "spaarpot_names", lambda: [])
+    monkeypatch.setattr(rc, "spaarpot_names", lambda: [])
 
     import automation.ai_categorizer as ai
 
@@ -181,9 +182,10 @@ def test_rules_mode_sends_nothing_to_the_ai(monkeypatch, capsys, tmp_path):
             raise AssertionError("the AI must not be built in --rules mode")
     monkeypatch.setattr(ai, "ClaudeCategorizer", NoAI)
     names = tmp_path / "names.tsv"
-    code = ev.main(["--rules", "--names-out", str(names), "x.csv"])
+    draft = tmp_path / "draft.py"
+    code = ev.main(["--rules", "--names-out", str(names), "--draft-out", str(draft), "x.csv"])
     out = capsys.readouterr().out
     assert code == 0
-    assert "rule coverage" in out and "names written to" in out
+    assert "rule coverage" in out and "names written to" in out and "draft written to" in out
     assert SECRET_NAME not in out and "3.10" not in out
-    assert names.exists()
+    assert names.exists() and draft.exists()
