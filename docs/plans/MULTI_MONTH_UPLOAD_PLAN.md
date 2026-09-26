@@ -2390,6 +2390,28 @@ measures them on months where the right answer is already known.
     code), propose a conditional rule instead of `review`; keep `review`
     for groups nothing separates (multi-purpose shops). The report adds a
     projection of rows per month that would still need the user.
+  - User decisions on the approach (2026-09-26): a group with fewer than
+    3 rows in the window is dropped (the AI decides); a split may use any
+    feature but the year (code, recurring amount, keyword, and also
+    amount, weekend and time of day, since every row carries them when
+    written, and the 2026 holdout shows whether a habit split holds); a
+    branch still mixed after a split goes to the AI; card payments in a
+    `gd` group count as marked; the projection prices rows left to the AI
+    at the last Sonnet run's rates.
+  - Done 2026-09-26 (me), 612 tests green: proposals rest on the last 12
+    sheet months in the data. `drop` when a group has no rows there (`not
+    seen`) or fewer than 3 (`too few`); then `gd`, `keep`, `split` (the
+    best feature but the year, leave-one-out, where a branch of 3+ rows at
+    >= 95 % writes its category and every other branch, or a value not
+    seen, goes to the AI), and `review` when no split gives a branch a
+    category. What a draft would write is counted over the window too, so
+    pre-move rows no longer count against a recent rule. The projection
+    counts, per month over the window, rows by today's rules, by new rules
+    (plain), marked (`review`, card rows in `gd`) and left to the AI, and
+    derives rows that need the user (marked plus 53 % of the AI rows) and
+    rows written wrong unmarked (rule and plain errors plus 16 % of the AI
+    rows), today against the proposals. The draft file gains `branches`
+    (the fitted split, with its amount or word) and `recent` columns.
   - Holdout: 2026 is not looked at while choosing rules. Once the rules
     are in, the 2026 months already categorised by hand (January to
     21 May) score them, with an export of those months (`--years 2026`).

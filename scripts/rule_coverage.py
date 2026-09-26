@@ -11,8 +11,11 @@ Runs the regex pass alone over the hand-checked months and reports:
   only fits its own rows does not win;
 - whether pot transfers can be linked to the purchases they cover: a transfer
   from the savings account equals one purchase, or the exact sum of several;
-- draft rules for the uniform groups, with their precision over every
-  uncovered row, and suggested roles for the household's own accounts.
+- a proposed decision per name group from its rows in the last 12 sheet
+  months (keep, split on one feature, review, gd or drop), what each would
+  write there, and suggested roles for the household's own accounts;
+- a projection over those months of the rows per month that would still
+  need the user, today and with the proposals.
 
 The printed report holds counts, category and feature names, rule patterns
 (which are code) and anonymous group ids only. Names, IBANs, keywords and
@@ -39,6 +42,15 @@ USEFUL_GAIN = 0.10        # a split (leave-one-out) must beat the top category's
 KEYWORD_CANDIDATES = 40   # most frequent words tried as a keyword split
 LINK_WINDOWS = (7, 14, 31)  # days between a pot transfer and the purchases it covers
 LINK_MAX_ITEMS = 4        # purchases one pot transfer may cover
+RECENT_MONTHS = 12        # proposals rest on the last this many sheet months in the data
+SPLIT_EXCLUDED = ("year",)  # a future row is always in a new year, so no rule splits on it
+# Rows left to the AI, at the last Sonnet run's rates (2026-09-26, 0.75
+# threshold): 529 of 990 flagged, 155 of 990 written wrong and unflagged.
+AI_FLAG_RATE = 529 / 990
+AI_SILENT_WRONG_RATE = 155 / 990
+AI = "ai"                 # a split branch that leaves the row to the AI
+DROP_WHY = {"not seen": f"not seen in {RECENT_MONTHS} months",
+            "too few": f"fewer than {GROUP_MIN} recent rows"}
 
 UIT_SPAARPOTJE = "Uit spaarpotje"
 GOEIE_DOELEN = "Goeie doelen"
@@ -158,27 +170,12 @@ def _top(counter):
     return min(((k, n) for k, n in counter.items() if n > 0), key=lambda kv: (-kv[1], kv[0]))[0]
 
 
-def _fit_majority(rows):
-    top = _top(Counter(t for _, t in rows))
-    return (lambda tx: top), f"always {top}"
+def _constant(rows):
+    return (lambda tx: "all"), (lambda v: "any")
 
 
-def _fit_table(rows, value_of, describe):
-    by = defaultdict(Counter)
-    for tx, t in rows:
-        by[value_of(tx)][t] += 1
-    default = _top(Counter(t for _, t in rows))
-    table = {v: _top(c) for v, c in by.items()}
-    detail = "; ".join(f"{describe(v)} -> {table[v]} ({sum(by[v].values())})"
-                       for v in sorted(by, key=str))
-    return (lambda tx: table.get(value_of(tx), default)), detail
-
-
-def _fit_threshold(rows, value_of, fmt):
-    """One cut on a number; rows without the number are a branch of their own."""
-    default = _top(Counter(t for _, t in rows))
-    missing = Counter(t for tx, t in rows if value_of(tx) is None)
-    if_missing = _top(missing) if missing else default
+def _key_threshold(rows, value_of, fmt):
+    """One cut on a number, chosen in-sample; rows without the number are a branch of their own."""
     have = sorted(((value_of(tx), t) for tx, t in rows if value_of(tx) is not None),
                   key=lambda p: p[0])
     below, above = Counter(), Counter(t for _, t in have)
@@ -191,29 +188,28 @@ def _fit_threshold(rows, value_of, fmt):
             continue
         correct = max(below.values()) + max(above.values())
         if best is None or correct > best[0]:
-            best = (correct, (value + have[k + 1][0]) / 2, _top(below), _top(above))
+            best = (correct, (value + have[k + 1][0]) / 2)
     if best is None:
-        return (lambda tx: if_missing if value_of(tx) is None else default), "no cut"
-    _, cut, low, high = best
+        return (lambda tx: None if value_of(tx) is None else "all"), (lambda v: "none" if v is None else "any")
+    cut = best[1]
 
-    def predict(tx):
+    def key(tx):
         v = value_of(tx)
-        return if_missing if v is None else (low if v < cut else high)
-    return predict, f"below {fmt(cut)} -> {low}; from {fmt(cut)} -> {high}"
+        return None if v is None else v >= cut
+    return key, lambda v: {None: "none", False: f"below {fmt(cut)}", True: f"from {fmt(cut)}"}[v]
 
 
-def _fit_recurring(rows):
+def _key_recurring(rows):
     """Whether the amount is the group's most repeated one (a fixed transfer)."""
     amounts = Counter(tx_amount(tx) for tx, _ in rows if tx_amount(tx) is not None)
     repeated = [a for a, n in amounts.items() if n >= 2]
     if not repeated:
-        return _fit_majority(rows)
+        return _constant(rows)
     modal = min(repeated, key=lambda a: (-amounts[a], a))
-    return _fit_table(rows, lambda tx: tx_amount(tx) == modal,
-                      lambda v: f"{'at' if v else 'not at'} {modal:.2f}")
+    return (lambda tx: tx_amount(tx) == modal), (lambda v: f"{'at' if v else 'not at'} {modal:.2f}")
 
 
-def _fit_keyword(rows, words_of):
+def _key_keyword(rows, words_of):
     """The word whose presence best splits the rows; ties go alphabetically."""
     counts = Counter(w for tx, _ in rows for w in words_of(tx))
     tried = sorted((w for w, n in counts.items() if 2 <= n < len(rows)),
@@ -225,51 +221,68 @@ def _fit_keyword(rows, words_of):
             (present if word in words_of(tx) else absent)[t] += 1
         correct = max(present.values()) + max(absent.values())
         if best is None or correct > best[0]:
-            best = (correct, word, _top(present), _top(absent), present, absent)
+            best = (correct, word)
     if best is None:
-        return _fit_majority(rows)
-    _, word, yes, no, present, absent = best
-    detail = (f"with {word!r} -> {yes} ({sum(present.values())}); "
-              f"without -> {no} ({sum(absent.values())})")
-    return (lambda tx: yes if word in words_of(tx) else no), detail
+        return _constant(rows)
+    word = best[1]
+    return (lambda tx: word in words_of(tx)), (lambda v: f"with {word!r}" if v else "without")
 
 
 def _features(words_of):
-    """(name, fit) in order of preference when two score the same."""
+    """(name, key) in order of preference when two score the same.
+
+    A key is fitted on rows and returns (value_of, describe): the branch a
+    row falls in, and how to name a branch (which may hold an amount or a
+    word, so it is for the private draft only).
+    """
     return (
-        ("direction", lambda rows: _fit_table(rows, tx_direction, str)),
-        ("code", lambda rows: _fit_table(rows, tx_code, str)),
-        ("weekend", lambda rows: _fit_table(rows, tx_weekend,
-                                            lambda v: {True: "weekend", False: "weekday"}.get(v, "no date"))),
-        ("time of day", lambda rows: _fit_threshold(rows, tx_hour, lambda c: f"{c:.1f}h")),
-        ("recurring amount", _fit_recurring),
-        ("amount", lambda rows: _fit_threshold(rows, tx_amount, lambda c: f"{c:.2f}")),
-        ("keyword", lambda rows: _fit_keyword(rows, words_of)),
+        ("direction", lambda rows: (tx_direction, str)),
+        ("code", lambda rows: (tx_code, str)),
+        ("weekend", lambda rows: (tx_weekend,
+                                  lambda v: {True: "weekend", False: "weekday"}.get(v, "no date"))),
+        ("time of day", lambda rows: _key_threshold(rows, tx_hour, lambda c: f"{c:.1f}h")),
+        ("recurring amount", _key_recurring),
+        ("amount", lambda rows: _key_threshold(rows, tx_amount, lambda c: f"{c:.2f}")),
+        ("keyword", lambda rows: _key_keyword(rows, words_of)),
         # Last, so any feature a rule could use wins a tie: a year split means
         # the booking habit changed, and the latest year is the one to follow.
-        ("year", lambda rows: _fit_table(rows, tx_year, str)),
+        ("year", lambda rows: (tx_year, str)),
     )
 
 
-def _leave_one_out(rows, fit):
+def _fit(rows, key):
+    """Each branch's top category; a value not seen in fitting gets the overall top."""
+    value_of, describe = key(rows)
+    by = defaultdict(Counter)
+    for tx, t in rows:
+        by[value_of(tx)][t] += 1
+    default = _top(Counter(t for _, t in rows))
+    table = {v: _top(c) for v, c in by.items()}
+    detail = "; ".join(f"{describe(v)} -> {table[v]} ({sum(by[v].values())})"
+                       for v in sorted(by, key=str))
+    return SimpleNamespace(predict=lambda tx: table.get(value_of(tx), default), detail=detail,
+                           value_of=value_of, describe=describe, branches=dict(by))
+
+
+def _leave_one_out(rows, key):
     correct = 0
     for i, (tx, truth) in enumerate(rows):
-        predict, _ = fit(rows[:i] + rows[i + 1:])
-        correct += predict(tx) == truth
+        correct += _fit(rows[:i] + rows[i + 1:], key).predict(tx) == truth
     return correct / len(rows)
 
 
-def best_split(rows):
+def best_split(rows, exclude=()):
     """Which single feature predicts a group's category best, leave-one-out.
 
     The baseline is the top category's share, what a plain rule scores. It
     is not taken leave-one-out: in a balanced group that scores 0 (holding
     out a row hands the majority to the other category), which would make
     any split look like a gain. `detail` (the fitted split, which may hold
-    an amount or a word) is for the private draft only.
+    an amount or a word) is for the private draft only; `fit` is the best
+    feature fitted on all rows.
     """
     words = {id(tx): tx_words(tx) for tx, _ in rows}
-    features = _features(lambda tx: words[id(tx)])
+    features = [(name, key) for name, key in _features(lambda tx: words[id(tx)]) if name not in exclude]
     truths = Counter(t for _, t in rows)
     majority = truths[_top(truths)] / len(rows)
     scores = {name: _leave_one_out(rows, fit) for name, fit in features}
@@ -277,8 +290,9 @@ def best_split(rows):
     best = next(name for name, _ in features if scores[name] == top)
     if top - majority < USEFUL_GAIN:
         best = None
-    detail = dict(features)[best](rows)[1] if best else ""
-    return dict(majority=majority, features=scores, best=best, gain=top - majority, detail=detail)
+    fit = _fit(rows, dict(features)[best]) if best else None
+    return dict(majority=majority, features=scores, best=best, gain=top - majority,
+                detail=fit.detail if fit else "", fit=fit)
 
 
 # ── linking pot transfers to the purchases they cover ──────────────────────
@@ -464,56 +478,145 @@ def _latest_top(members):
     return _top(by_year[max(by_year)])
 
 
-def _propose(truths, share, stability, category):
-    """keep (plain rule), review (top category, always marked) or gd (Goeie doelen)."""
-    if truths[GOEIE_DOELEN] / sum(truths.values()) >= GD_SHARE:
-        return "gd"
-    if share >= KEEP_SHARE and stability != "shifts" and category == _top(truths):
-        return "keep"
-    return "review"
+def _window(records):
+    """The last RECENT_MONTHS sheet months ("MM/YYYY") present in the data."""
+    labels = {r.label for r in records}
+    return sorted(labels, key=lambda label: (label[3:], label[:2]))[-RECENT_MONTHS:]
 
 
-def _draft(uncovered, name_groups):
+def _conditional(pairs, known):
+    """A rule that splits on one feature, or None when no branch gets a category.
+
+    A branch gets its top category when it has GROUP_MIN rows at KEEP_SHARE
+    or more; any other branch, and a value not seen here, goes to the AI.
+    """
+    split = best_split(pairs, exclude=SPLIT_EXCLUDED)
+    if not split["best"]:
+        return None
+    fit = split["fit"]
+    outcomes = {}
+    for value, truths in fit.branches.items():
+        top, n = _top(truths), sum(truths.values())
+        outcomes[value] = top if n >= GROUP_MIN and truths[top] / n >= KEEP_SHARE and known(top) else AI
+    if all(o == AI for o in outcomes.values()):
+        return None
+    order = sorted(outcomes, key=str)
+    value_of = fit.value_of
+    return dict(feature=split["best"], outcome=lambda tx: outcomes.get(value_of(tx), AI),
+                outcomes=[outcomes[v] for v in order],
+                detail="; ".join(f"{fit.describe(v)} -> {outcomes[v]} ({sum(fit.branches[v].values())})"
+                                 for v in order))
+
+
+def _decider(decision, category, split):
+    """(category or None for the AI, marked) for a row the draft's pattern catches."""
+    if decision == "review":
+        return lambda tx: (category, True)
+    if decision == "gd":
+        return lambda tx: (GOEIE_DOELEN, tx_code(tx) == "BEA")
+    if decision == "split":
+        def decide(tx):
+            outcome = split["outcome"](tx)
+            return (None if outcome == AI else outcome), False
+        return decide
+    return lambda tx: (category, False)   # keep; for drop, what it would have caught
+
+
+def _draft(uncovered, name_groups, window):
     """A proposed decision per name group and direction, tried on every uncovered row.
 
-    A group that shifted between years follows its latest year. `hits` and
-    `correct` count every uncovered row the pattern would catch.
+    Decided on the group's rows in `window`: `drop` when it has none there
+    or fewer than GROUP_MIN, then `gd`, `keep`, a `split` on one feature a
+    rule can check, and `review` when nothing separates the rows. A group
+    that shifted between years follows its latest year. `hits` and
+    `correct` count every uncovered row in `window` the pattern would
+    write a category for, its own and other groups'.
     """
     from constants import ExpenseCategory, IncomeCategory
     from finance_core.categorization_rules import search_text
+    inside = set(window)
     drafts = []
     for g in name_groups:
         for direction in ("out", "in"):
             members = [(r, t) for r, t in g["members"] if tx_direction(r.tx) == direction]
             if len(members) < GROUP_MIN:
                 continue
-            truths = Counter(t for _, t in members)
-            stability = _stability(members)
-            category = _latest_top(members) if stability == "shifts" else _top(truths)
-            share = truths[_top(truths)] / len(members)
-            decision = _propose(truths, share, stability, category)
-            if decision == "gd":
-                category = GOEIE_DOELEN
             enum = IncomeCategory if direction == "in" else ExpenseCategory
-            member = next((f"{enum.__name__}.{m.name}" for m in enum if m.value == category), None)
-            if member is None:
+            names = {m.value: f"{enum.__name__}.{m.name}" for m in enum}
+            recent = [(r, t) for r, t in members if r.label in inside]
+            basis = recent or members
+            truths = Counter(t for _, t in basis)
+            stability = _stability(basis)
+            category = _latest_top(basis) if stability == "shifts" else _top(truths)
+            share = truths[_top(truths)] / len(basis)
+            split, why = None, ""
+            if not recent:
+                decision, why = "drop", "not seen"
+            elif len(recent) < GROUP_MIN:
+                decision, why = "drop", "too few"
+            elif truths[GOEIE_DOELEN] / len(recent) >= GD_SHARE:
+                decision, category = "gd", GOEIE_DOELEN
+            elif share >= KEEP_SHARE and stability != "shifts" and category == _top(truths):
+                decision = "keep"
+            else:
+                split = _conditional([(r.tx, t) for r, t in recent], lambda c: c in names)
+                decision = "split" if split else "review"
+            if decision in ("keep", "review", "gd") and category not in names:
                 continue
             pattern = r"\b" + r"\W+".join(re.escape(w) for w in g["key"].split()) + r"\b"
             rx = re.compile(pattern, re.IGNORECASE)
-            hits = [t for r, t in uncovered
-                    if tx_direction(r.tx) == direction and rx.search(search_text(r.tx))]
-            drafts.append(dict(id=g["id"], key=g["key"], direction=direction, decision=decision,
-                               pattern=pattern, category=category, member=member, rows=len(members),
-                               share=share, truths=truths, stability=stability, hits=len(hits),
-                               correct=sum(t == category for t in hits), names=g["names"]))
+            decide = _decider(decision, category, split)
+            written = [(decide(r.tx)[0], t) for r, t in uncovered if r.label in inside and
+                       tx_direction(r.tx) == direction and rx.search(search_text(r.tx))]
+            written = [(c, t) for c, t in written if c is not None]
+            drafts.append(dict(id=g["id"], key=g["key"], direction=direction, decision=decision, why=why,
+                               pattern=pattern, category="-" if split else category,
+                               member=None if split else names.get(category), split=split, decide=decide,
+                               rows=len(members), recent=len(recent), share=share, truths=truths,
+                               stability=stability, hits=len(written),
+                               correct=sum(c == t for c, t in written), names=g["names"]))
     return drafts
+
+
+def _projection(records, fired, rows, drafts, window):
+    """Rows in `window`, today and with the proposals: by rule, plain, marked, to the AI.
+
+    With the proposals, an uncovered row takes the first draft (not dropped)
+    of its direction whose pattern matches it.
+    """
+    from finance_core.categorization_rules import search_text
+    inside = set(window)
+    active = [(d, re.compile(d["pattern"], re.IGNORECASE)) for d in drafts if d["decision"] != "drop"]
+    today, proposed = Counter(), Counter()
+    for rec, rule, row in zip(records, fired, rows):
+        if rec.label not in inside:
+            continue
+        if rule:
+            for c in (today, proposed):
+                c["rules"] += 1
+                c["rules_wrong"] += not row["correct"]
+            continue
+        today["ai"] += 1
+        text, direction = search_text(rec.tx), tx_direction(rec.tx)
+        draft = next((d for d, rx in active if d["direction"] == direction and rx.search(text)), None)
+        category, marked = draft["decide"](rec.tx) if draft else (None, False)
+        if category is None:
+            proposed["ai"] += 1
+        elif marked:
+            proposed["marked"] += 1
+        else:
+            proposed["plain"] += 1
+            proposed["plain_wrong"] += category != row["truth"]
+    keys = ("rules", "rules_wrong", "plain", "plain_wrong", "marked", "ai")
+    return dict(months=len(window), today={k: today[k] for k in keys},
+                proposed={k: proposed[k] for k in keys})
 
 
 def _watch(pairs, fired, rows, drafts):
     """Goeie doelen recall: donations the rules catch and the proposals would add."""
     caught = sum(1 for rule, row in zip(fired, rows)
                  if rule and row["correct"] and row["truth"] == GOEIE_DOELEN)
-    proposed = [d for d in drafts if d["category"] == GOEIE_DOELEN]
+    proposed = [d for d in drafts if d["category"] == GOEIE_DOELEN and d["decision"] != "drop"]
     return dict(total=sum(1 for _, t in pairs if t == GOEIE_DOELEN), by_rules=caught,
                 by_decisions=sum(d["truths"][GOEIE_DOELEN] for d in proposed),
                 marked_other=sum(d["rows"] - d["truths"][GOEIE_DOELEN] for d in proposed))
@@ -559,7 +662,8 @@ def rule_coverage(records, truths, txs, spaarpot_names=()):
     truth_of = {id(tx): truth for tx, truth in pairs}
     savings = savings_accounts(pairs)
     name_groups = _groups(uncovered, merchant_key, "N")
-    drafts = _draft(uncovered, name_groups)
+    window = _window(records)
+    drafts = _draft(uncovered, name_groups, window)
     return dict(
         scored=len(records),
         rules=rules,
@@ -572,7 +676,9 @@ def rule_coverage(records, truths, txs, spaarpot_names=()):
         links={(w, k): find_links(txs, truth_of, savings, w, k)
                for w in LINK_WINDOWS for k in range(1, LINK_MAX_ITEMS + 1)},
         accounts=account_roles(pairs, savings),
+        window=window,
         draft=drafts,
+        projection=_projection(records, fired, rows, drafts, window),
         watch=_watch(pairs, fired, rows, drafts),
     )
 
@@ -637,15 +743,41 @@ def format_rule_coverage(cov):
     kinds = Counter(x["decision"] for x in d)
     rows_by = Counter()
     for x in d:
-        rows_by[x["decision"]] += x["rows"]
-    keep = [x for x in d if x["decision"] == "keep"]
-    lines.append("decisions proposed per name group (change the first word in the draft file): " +
-                 ", ".join(f"{k} {kinds[k]} groups ({rows_by[k]} rows)" for k in ("keep", "review", "gd")) +
-                 f"; keep rules hit {_pct(sum(x['hits'] for x in keep), sum(x['correct'] for x in keep))} "
-                 "correct over all uncovered rows")
+        rows_by[x["decision"]] += x["recent"]
+    why = Counter(x["why"] for x in d if x["decision"] == "drop")
+    plain = [x for x in d if x["decision"] in ("keep", "split")]
+    lines.append(f"decisions proposed per name group, from the last {len(cov['window'])} sheet months "
+                 "(change the first word in the draft file): " +
+                 ", ".join(f"{k} {kinds[k]} groups ({rows_by[k]} recent rows)"
+                           for k in ("keep", "split", "review", "gd", "drop")) +
+                 "; drop: " + ", ".join(f"{why[k]} {text}" for k, text in DROP_WHY.items()) +
+                 "; keep and split rules write "
+                 f"{_pct(sum(x['hits'] for x in plain), sum(x['correct'] for x in plain))} "
+                 "correct over the uncovered rows in those months")
     for x in d:
-        lines.append(f"  {x['id']} {x['direction']} {x['decision']}: {x['rows']} rows, top {100 * x['share']:.0f}%, "
-                     f"{x['stability']}; hits {_pct(x['hits'], x['correct'])}")
+        extra = ""
+        if x["split"]:
+            extra = f"; split by {x['split']['feature']} -> {', '.join(x['split']['outcomes'])}"
+        elif x["why"]:
+            extra = f" ({DROP_WHY[x['why']]})"
+        lines.append(f"  {x['id']} {x['direction']} {x['decision']}{extra}: {x['recent']} recent rows of {x['rows']}, "
+                     f"top {100 * x['share']:.0f}%, {x['stability']}; writes {_pct(x['hits'], x['correct'])}")
+    p = cov["projection"]
+    months = p["months"] or 1
+    lines.append(f"per month over the last {p['months']} sheet months: rows that need you (marked, plus what "
+                 f"the AI flags) and rows written wrong unmarked; rows left to the AI count at the last Sonnet "
+                 f"run's rates ({100 * AI_FLAG_RATE:.0f}% flagged, {100 * AI_SILENT_WRONG_RATE:.0f}% wrong "
+                 "unflagged), and the rows left after new rules are harder, so likely more:")
+    for name in ("today", "proposed"):
+        c = p[name]
+        flagged = c["ai"] * AI_FLAG_RATE
+        wrong = c["rules_wrong"] + c["plain_wrong"] + c["ai"] * AI_SILENT_WRONG_RATE
+        lines.append(f"  {name}: {(c['marked'] + flagged) / months:.1f} rows need you "
+                     f"({c['marked'] / months:.1f} marked, {flagged / months:.1f} flagged by the AI); "
+                     f"{wrong / months:.1f} written wrong unmarked; of "
+                     f"{sum(c[k] for k in ('rules', 'plain', 'marked', 'ai')) / months:.1f} rows: "
+                     f"{c['rules'] / months:.1f} by today's rules, {c['plain'] / months:.1f} by new rules, "
+                     f"{c['ai'] / months:.1f} to the AI")
     w = cov["watch"]
     lines.append(f"Goeie doelen recall (a missed donation costs a deduction): {w['total']} rows; "
                  f"today's rules catch {w['by_rules']}; the proposals add {w['by_decisions']} "
@@ -701,21 +833,31 @@ def write_draft(cov, path):
           "# words and amounts from your rows. Delete or fix lines, then hand back what you keep.\n\n")
         w("# 1. Decisions, one line per counterparty group. Change the FIRST word:\n"
           "#      keep    a plain rule: this category, not marked\n"
+          "#      split   a rule on one feature (see branches): each branch writes its category\n"
+          "#              or leaves the row to the AI (`ai`); a value not seen here goes to the AI\n"
           "#      review  this category, but always marked for you to check (multi-purpose shops)\n"
           "#      gd      Goeie doelen, catching too much rather than too little; rows that are\n"
           "#              less clearly a donation (e.g. a card payment) are marked\n"
           "#      drop    no rule; the AI decides\n"
-          "#    You may also change the category. `hits` is over every row no rule covers today,\n"
-          "#    so it shows what else the pattern would catch. Proposals: keep at >= "
-          f"{100 * KEEP_SHARE:.0f}% one\n"
-          f"#    category not shifting between years; gd at >= {100 * GD_SHARE:.0f}% donations; review otherwise\n"
-          "#    (a group that shifted takes its latest year's category).\n")
-        w("# decision\tid\tdirection\tcategory\tkey\tpattern\trows\ttop share\tstability\thits\tcategories\tnames\n")
+          "#    You may also change the category or a branch. `written` is over every recent row no\n"
+          "#    rule covers today, so it shows what else the pattern would catch. Proposals rest on the\n"
+          f"#    last {len(cov['window'])} sheet months ({', '.join(cov['window'][:1] + cov['window'][-1:])}): "
+          f"drop when a group has fewer than {GROUP_MIN}\n"
+          f"#    rows there; gd at >= {100 * GD_SHARE:.0f}% donations; keep at >= {100 * KEEP_SHARE:.0f}% one "
+          "category, not shifting\n"
+          "#    between years; split when one feature (not the year) gives a branch of "
+          f"{GROUP_MIN}+ rows at >= {100 * KEEP_SHARE:.0f}%;\n"
+          "#    review otherwise (a group that shifted takes its latest year's category).\n"
+          "#    `recent` and `top share` are over those months; `categories` too (all rows for a drop).\n")
+        w("# decision\tid\tdirection\tcategory\tkey\tpattern\tbranches\trecent\trows\ttop share\tstability\t"
+          "written\tcategories\tnames\n")
         for d in cov["draft"]:
             cats = ", ".join(f"{c} {k}" for c, k in d["truths"].most_common())
-            w(f"{d['decision']}\t{d['id']}\t{d['direction']}\t{d['category']}\t{d['key']}\t{d['pattern']}\t{d['rows']}\t"
-              f"{100 * d['share']:.0f}%\t{d['stability']}\t{d['correct']}/{d['hits']}\t{cats}\t"
-              f"{_names(d['names'], 3)}\n")
+            branches = (f"{d['split']['feature']}: {d['split']['detail']}" if d["split"]
+                        else DROP_WHY.get(d["why"], "-"))
+            w(f"{d['decision']}\t{d['id']}\t{d['direction']}\t{d['category']}\t{d['key']}\t{d['pattern']}\t"
+              f"{branches}\t{d['recent']}\t{d['rows']}\t{100 * d['share']:.0f}%\t{d['stability']}\t"
+              f"{d['correct']}/{d['hits']}\t{cats}\t{_names(d['names'], 3)}\n")
 
         w("\n# 2. Mixed groups: the single feature that splits each best (leave-one-out),\n"
           "#    fitted on all its rows. Check that it makes sense before it becomes a rule.\n")

@@ -232,10 +232,11 @@ DATA = [
     (cover("16-03-2024", "46.00"), "Spaarrekening"),
     (cover("17-03-2024", "47.00"), "Spaarrekening"),
     (tx("14-03-2024", "45.00", name="Webshop"), "Uit spaarpotje"),
-    # 80 % Boodschappen overall, but 2025 is all Snacken: no draft rule.
+    # 80 % Boodschappen overall, but 2025 is all Snacken, and nothing but
+    # the year tells them apart (amounts interleave): review, no split.
     *[(tx(f"1{d}-04-2024", f"6.{d}0", name="Kiosk"), "Boodschappen") for d in range(8)],
-    (tx("10-04-2025", "7.10", name="Kiosk"), "Snacken"),
-    (tx("11-04-2025", "7.20", name="Kiosk"), "Snacken"),
+    (tx("10-04-2025", "6.05", name="Kiosk"), "Snacken"),
+    (tx("11-04-2025", "6.45", name="Kiosk"), "Snacken"),
     # A church with a shop: donations by iDEAL, one card payment in the shop.
     (tx("02-05-2024", "20.00", name="Kerk De Rots", code="1 IDE"), "Goeie doelen"),
     (tx("09-05-2024", "25.00", name="Kerk De Rots", code="1 IDE"), "Goeie doelen"),
@@ -247,9 +248,9 @@ DATA = [
 ]
 
 
-def coverage():
-    txs = [t for t, _ in DATA]
-    m = ev.match_rows(txs, [row(t, c) for t, c in DATA], VALID, {})
+def coverage(data=DATA):
+    txs = [t for t, _ in data]
+    m = ev.match_rows(txs, [row(t, c) for t, c in data], VALID, {})
     return rc.rule_coverage(m.records, m.truths, txs, spaarpot_names=[])
 
 
@@ -297,6 +298,13 @@ def test_a_mixed_group_is_proposed_for_review_under_its_top_category():
 def test_a_group_that_shifted_follows_its_latest_year():
     kiosk = decisions()["kiosk"]
     assert kiosk["decision"] == "review" and kiosk["category"] == "Snacken"
+
+
+def test_a_year_split_is_never_proposed_as_a_rule():
+    """A future row is always in a new year, so `2025 -> X` cannot repeat."""
+    groups = {g["key"]: g for g in coverage()["name_groups"]}
+    assert groups["kiosk"]["split"]["best"] == "year"
+    assert decisions()["kiosk"]["split"] is None
 
 
 def test_a_group_a_quarter_donations_is_proposed_as_goeie_doelen():
@@ -352,3 +360,136 @@ def test_an_amount_cut_that_only_fits_noise_is_not_claimed():
     rows = [(tx(f"0{d}-03-2024", f"{d}.00"), c)
             for d, c in zip((4, 5, 6, 7, 8, 9), ("Huishouden", "Cadeautjes") * 3)]
     assert rc.best_split(rows)["best"] is None
+
+
+# ── proposals from the last 12 months ──────────────────────────────────────
+
+def _monthly(day, amount, name, category, months=range(1, 13), year=2025, **kw):
+    return [(tx(f"{day:02d}-{m:02d}-{year}", amount, name=name, **kw), category) for m in months]
+
+
+RECENT = [
+    # Fixed monthly free money to a personal account, next to wrong-card
+    # repayments to the same account: the recurring amount separates them,
+    # and a repayment takes the category of what was bought (the AI).
+    *_monthly(1, "150.00", "Eigen Rekening", "Persoonlijk vrij geld", iban=PERSONAL),
+    (tx("14-02-2025", "12.34", name="Eigen Rekening", iban=PERSONAL), "Boodschappen"),
+    (tx("15-04-2025", "23.45", name="Eigen Rekening", iban=PERSONAL), "Boodschappen"),
+    (tx("16-06-2025", "34.56", name="Eigen Rekening", iban=PERSONAL), "Huishouden"),
+    (tx("15-08-2025", "45.67", name="Eigen Rekening", iban=PERSONAL), "Cadeautjes"),
+    # Huishouden before the move, Boodschappen since: the recent rows decide.
+    *[(tx(f"10-0{m}-2024", f"{m}.10", name="Buurtwinkel"), "Huishouden") for m in range(1, 6)],
+    *[(tx(f"1{m}-03-2025", f"{m}.20", name="Buurtwinkel"), "Boodschappen") for m in range(0, 4)],
+    # Only before the move.
+    *_monthly(20, "5.00", "Oude Slager", "Boodschappen", months=(2, 3, 4), year=2024),
+    # Mostly before the move, once since.
+    *_monthly(21, "6.00", "Verhuisd Bakkerij", "Boodschappen", months=(1, 2, 3, 4), year=2024),
+    (tx("21-01-2025", "6.00", name="Verhuisd Bakkerij"), "Boodschappen"),
+    # Card payments at the bar, subscription by iDEAL: the code separates them.
+    *[(tx(f"0{d}-03-2025", a, name="Sportschool", code="1 BEA"), "Dates/uitjes")
+      for d, a in zip((3, 4, 5, 6), ("10.00", "30.00", "10.00", "30.00"))],
+    *[(tx(f"1{d}-03-2025", a, name="Sportschool", code="1 IDE"), "Rekeningen")
+      for d, a in zip((0, 1, 2, 3), ("20.00", "40.00", "20.00", "40.00"))],
+    # A multi-purpose shop: nothing separates the rows.
+    *[(tx(f"{d:02d}-05-2025", "10.00", name="Warenhuis", rem="x"), c)
+      for d, c in zip((5, 6, 7, 8, 9, 12), ("Huishouden", "Cadeautjes") * 3)],
+    # The code splits it, but leaves both branches mixed: still review.
+    *[(tx(f"{d:02d}-07-2025", "10.00", name="Tweeluik", code="1 BEA"), c)
+      for d, c in zip((7, 8, 9, 10, 11), ("Huishouden",) * 4 + ("Cadeautjes",))],
+    *[(tx(f"{d:02d}-07-2025", "10.00", name="Tweeluik", code="1 IDE"), c)
+      for d, c in zip((14, 15, 16, 17, 18), ("Cadeautjes",) * 4 + ("Huishouden",))],
+    # Donations by iDEAL, one card payment in the church shop.
+    (tx("02-06-2025", "20.00", name="Kerk Het Licht", code="1 IDE"), "Goeie doelen"),
+    (tx("09-06-2025", "25.00", name="Kerk Het Licht", code="1 IDE"), "Goeie doelen"),
+    (tx("16-06-2025", "8.50", name="Kerk Het Licht", code="1 BEA"), "Boodschappen"),
+    # Covered by today's rules, once wrongly.
+    (tx("20-06-2025", "11.00", name="JUMBO UTRECHT"), "Boodschappen"),
+    (tx("23-06-2025", "12.00", name="JUMBO UTRECHT"), "Cadeautjes"),
+]
+
+
+def recent():
+    return {d["key"]: d for d in coverage(RECENT)["draft"]}
+
+
+def test_the_window_is_the_last_twelve_sheet_months_in_the_data():
+    assert coverage(RECENT)["window"] == [f"{m:02d}/2025" for m in range(1, 13)]
+
+
+def test_a_group_is_judged_on_its_recent_rows_only():
+    shop = recent()["buurtwinkel"]
+    assert shop["decision"] == "keep" and shop["category"] == "Boodschappen"
+    assert (shop["recent"], shop["rows"]) == (4, 9)
+    # What it would write is counted over the window too: not the old rows.
+    assert (shop["hits"], shop["correct"]) == (4, 4)
+
+
+def test_a_group_not_seen_in_twelve_months_is_dropped():
+    old = recent()["oude slager"]
+    assert (old["decision"], old["why"]) == ("drop", "not seen")
+
+
+def test_a_group_with_too_few_recent_rows_is_dropped():
+    moved = recent()["verhuisd bakkerij"]
+    assert (moved["decision"], moved["why"]) == ("drop", "too few")
+
+
+def test_the_recurring_amount_splits_free_money_from_repayments():
+    own = recent()["eigen rekening"]
+    assert own["decision"] == "split" and own["split"]["feature"] == "recurring amount"
+    # The mixed branch goes to the AI; only the fixed amount gets a category.
+    assert sorted(own["split"]["outcomes"]) == ["Persoonlijk vrij geld", "ai"]
+    assert (own["hits"], own["correct"]) == (12, 12)
+
+
+def test_the_transaction_code_splits_a_group_into_two_categories():
+    gym = recent()["sportschool"]
+    assert gym["decision"] == "split" and gym["split"]["feature"] == "code"
+    assert sorted(gym["split"]["outcomes"]) == ["Dates/uitjes", "Rekeningen"]
+    assert (gym["hits"], gym["correct"]) == (8, 8)
+
+
+def test_a_group_nothing_separates_stays_review():
+    assert recent()["warenhuis"]["decision"] == "review"
+    assert recent()["warenhuis"]["split"] is None
+
+
+def test_a_split_that_leaves_every_branch_mixed_stays_review():
+    assert recent()["tweeluik"]["decision"] == "review"
+
+
+def test_the_projection_counts_what_would_still_need_the_user():
+    """Over the window: today's rules, the proposals, and what the AI gets."""
+    p = coverage(RECENT)["projection"]
+    assert p["months"] == 12
+    assert p["today"] == dict(rules=2, rules_wrong=1, plain=0, plain_wrong=0, marked=0, ai=48)
+    # Plain: 12 free money, 4 Buurtwinkel, 8 Sportschool, 2 donations.
+    # Marked: 6 Warenhuis, 10 Tweeluik, the card payment at the church.
+    # AI: 4 repayments, the one recent Verhuisd Bakkerij row.
+    assert p["proposed"] == dict(rules=2, rules_wrong=1, plain=26, plain_wrong=0, marked=17, ai=5)
+
+
+def test_the_projection_is_printed_per_month_with_the_ai_estimate():
+    out = "\n".join(rc.format_rule_coverage(coverage(RECENT)))
+    need_today = 48 * rc.AI_FLAG_RATE / 12
+    need_proposed = (17 + 5 * rc.AI_FLAG_RATE) / 12
+    assert f"today: {need_today:.1f} rows need you" in out
+    assert f"proposed: {need_proposed:.1f} rows need you" in out
+
+
+def test_the_printed_splits_name_the_feature_but_not_the_amount_or_the_word():
+    out = "\n".join(rc.format_rule_coverage(coverage(RECENT)))
+    assert "split by recurring amount" in out and "split by code" in out
+    assert "drop" in out and "not seen in 12 months" in out
+    for secret in (PERSONAL, "150.00", "Eigen", "eigen", "Sportschool", "Warenhuis", "Buurtwinkel"):
+        assert secret not in out
+
+
+def test_the_draft_file_holds_each_split_with_its_branches(tmp_path):
+    path = tmp_path / "draft.txt"
+    rc.write_draft(coverage(RECENT), str(path))
+    lines = path.read_text().splitlines()
+    own = next(line for line in lines if "\teigen rekening\t" in line)
+    assert own.startswith("split\t")
+    assert "at 150.00 -> Persoonlijk vrij geld" in own and "not at 150.00 -> ai" in own
+    assert next(line for line in lines if "\toude slager\t" in line).startswith("drop\t")
