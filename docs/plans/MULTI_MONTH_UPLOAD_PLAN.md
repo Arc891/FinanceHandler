@@ -2369,6 +2369,27 @@ measures them on months where the right answer is already known.
     keep accented letters. The report adds Goeie doelen recall: donations
     today's rules catch, what the proposals add, and how many other rows
     they would mark as Goeie doelen.
+  - User review of the decision table (2026-09-26):
+    - N07 and N12 are transfers from the joint account to a personal
+      account, repaying purchases made with the wrong card. They sit next
+      to the fixed monthly free money to the same accounts, so the
+      recurring amount separates free money; a repayment takes the
+      category of what was bought, which only the text can say (the AI).
+    - N15 mixes monthly charges with incidental ones: the recurring amount
+      should separate them.
+    - N10, N13, N14 and N15 are outdated: the household moved, so older
+      rows describe counterparties and habits that no longer apply.
+    - Account roles confirmed: one savings account; the partner's personal
+      account is her ASN student account; the user's are ING and, since
+      a few months (2026 data only), Revolut.
+    - Pot links become a hint (a mark or context for the AI), not a rule.
+  - Next, before step 2 (me): too many `review` lines defeat the purpose,
+    so the proposals change. Base them on recent data (the last 12 months
+    of each group) and propose `drop` for groups not seen in that time;
+    where a split feature separates a group (recurring amount, direction,
+    code), propose a conditional rule instead of `review`; keep `review`
+    for groups nothing separates (multi-purpose shops). The report adds a
+    projection of rows per month that would still need the user.
   - Holdout: 2026 is not looked at while choosing rules. Once the rules
     are in, the 2026 months already categorised by hand (January to
     21 May) score them, with an export of those months (`--years 2026`).
