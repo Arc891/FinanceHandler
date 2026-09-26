@@ -35,7 +35,7 @@ image's config and service account are used as they are):
     # The names file is for the user's eyes; the printed report is not.
     docker exec finance-automation-bot python /tmp/eval/eval_categoriser.py \\
         --src /tmp/eval/src --rules --names-out /tmp/eval/rule-names.tsv \\
-        --draft-out /tmp/eval/rule-draft.py /tmp/eval/*.csv
+        --draft-out /tmp/eval/rule-draft.txt /tmp/eval/*.csv
     # (rule_coverage.py must sit next to this script: scp it along.)
     # afterwards, remove the exports from both places
     docker exec finance-automation-bot rm -rf /tmp/eval

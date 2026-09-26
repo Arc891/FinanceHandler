@@ -2346,6 +2346,32 @@ measures them on months where the right answer is already known.
     account numbers to a 0600 file. Findings: the leave-one-out majority
     scores 0 on a balanced group, so it is no baseline; random synthetic
     amounts made most 4-purchase links ambiguous, hence the per-size table.
+  - Second real run (2026-09-26): a time of day appears in 196 / 1,918
+    rows, the same count as iDEAL (IDE) rows, so card payments carry none
+    and the snackbar splits by amount if at all. **Pot linking fails as a
+    rule**: the best setting (7 days, one purchase) explains 22 / 91 Uit
+    spaarpotje rows against 13 wrong claims (63 %, mostly Rekeningen), and
+    larger sets or windows turn ambiguous. Reading (moderate confidence):
+    every row booked Uit spaarpotje has a covering transfer, but not every
+    covered purchase is booked so. Linking stays a hint (a mark, or context
+    for the AI), never a category. 8 of 34 draft patterns matched none of
+    their own rows (names with a hyphen or accent), fixed below.
+  - User decisions (2026-09-26): multi-purpose shops (Kruidvat, Action) get
+    their most common category and are always marked for review; Goeie
+    doelen favours recall over precision (donations are gathered by hand
+    for the tax return), with card payments at a church shop marked rather
+    than excluded; 2026 data joins the evaluation later.
+  - Done 2026-09-26 (me), 599 tests green: the draft is a decision table,
+    one line per name group and direction, first word `keep` (plain rule,
+    proposed at >= 95 % and not shifting), `review` (top category, always
+    marked; a shifted group takes its latest year's), `gd` (proposed at
+    >= 25 % donations) or `drop`. Patterns join words with `\W+` and keys
+    keep accented letters. The report adds Goeie doelen recall: donations
+    today's rules catch, what the proposals add, and how many other rows
+    they would mark as Goeie doelen.
+  - Holdout: 2026 is not looked at while choosing rules. Once the rules
+    are in, the 2026 months already categorised by hand (January to
+    21 May) score them, with an export of those months (`--years 2026`).
   - Next: the user runs it on the Pi and picks rules from the pure groups;
     IBAN rules for own accounts (Spaarrekening, Persoonlijke rekening)
     would live in config, not in `constants.py`. Mixed groups show where

@@ -22,7 +22,7 @@ SAVINGS = "NL99SAVE0000000001"
 PERSONAL = "NL98PERS0000000002"
 VALID = {"expenses": {"Boodschappen", "Snacken", "Huishouden", "Cadeautjes", "Uit spaarpotje",
                       "Persoonlijk vrij geld", "Naar spaarpotjes", "Dates/uitjes", "Rekeningen",
-                      "Zorgverzekering"},
+                      "Zorgverzekering", "Goeie doelen"},
          "income": {"Spaarrekening", "Gift"}}
 
 
@@ -236,6 +236,14 @@ DATA = [
     *[(tx(f"1{d}-04-2024", f"6.{d}0", name="Kiosk"), "Boodschappen") for d in range(8)],
     (tx("10-04-2025", "7.10", name="Kiosk"), "Snacken"),
     (tx("11-04-2025", "7.20", name="Kiosk"), "Snacken"),
+    # A church with a shop: donations by iDEAL, one card payment in the shop.
+    (tx("02-05-2024", "20.00", name="Kerk De Rots", code="1 IDE"), "Goeie doelen"),
+    (tx("09-05-2024", "25.00", name="Kerk De Rots", code="1 IDE"), "Goeie doelen"),
+    (tx("16-05-2024", "8.50", name="Kerk De Rots", code="1 BEA"), "Boodschappen"),
+    # Hyphen and accent in the name: the pattern must still match its own rows.
+    (tx("03-05-2024", "9.10", name="Café-Zon B.V."), "Dates/uitjes"),
+    (tx("10-05-2024", "9.20", name="Café-Zon B.V."), "Dates/uitjes"),
+    (tx("17-05-2024", "9.30", name="CAFÉ ZON"), "Dates/uitjes"),
 ]
 
 
@@ -261,16 +269,46 @@ def test_mixed_groups_carry_a_split_and_pure_ones_do_not():
     assert "split" in groups["hema"] and "split" not in groups["bakker bart"]
 
 
-def test_draft_rules_come_from_uniform_groups_with_word_bounded_patterns():
-    draft = {d["key"]: d for d in coverage()["draft"]}
-    bakker = draft["bakker bart"]
-    assert bakker["pattern"] == r"\bbakker\s+bart\b"
+def decisions():
+    return {d["key"]: d for d in coverage()["draft"]}
+
+
+def test_a_uniform_group_is_proposed_as_a_plain_rule_with_word_bounds():
+    bakker = decisions()["bakker bart"]
+    assert bakker["decision"] == "keep"
+    assert bakker["pattern"] == r"\bbakker\W+bart\b"
     assert bakker["member"] == "ExpenseCategory.BOODSCHAPPEN"
     # Over every uncovered row: the Tikkie row matches too, Bartholomeus not.
     assert (bakker["hits"], bakker["correct"]) == (4, 4)
-    assert draft["oma jansen"]["member"] == "IncomeCategory.GIFT"
-    assert "hema" not in draft
-    assert "kiosk" not in draft
+    assert decisions()["oma jansen"]["member"] == "IncomeCategory.GIFT"
+
+
+def test_a_pattern_matches_its_own_rows_despite_hyphens_and_accents():
+    cafe = decisions()["café zon"]
+    assert (cafe["hits"], cafe["correct"]) == (3, 3)
+
+
+def test_a_mixed_group_is_proposed_for_review_under_its_top_category():
+    """Kruidvat-like shops: most common category, always marked for review."""
+    hema = decisions()["hema"]
+    assert hema["decision"] == "review"
+
+
+def test_a_group_that_shifted_follows_its_latest_year():
+    kiosk = decisions()["kiosk"]
+    assert kiosk["decision"] == "review" and kiosk["category"] == "Snacken"
+
+
+def test_a_group_a_quarter_donations_is_proposed_as_goeie_doelen():
+    """Missing a donation costs a tax deduction; a wrong one is filtered by hand."""
+    kerk = decisions()["kerk de"]
+    assert kerk["decision"] == "gd" and kerk["category"] == "Goeie doelen"
+
+
+def test_goeie_doelen_recall_is_reported():
+    watch = coverage()["watch"]
+    assert watch["total"] == 2 and watch["by_rules"] == 0 and watch["by_decisions"] == 2
+    assert watch["marked_other"] == 1
 
 
 def test_the_report_includes_links_for_each_window_and_set_size():
@@ -287,19 +325,24 @@ def test_account_roles_are_suggested_from_savings_and_free_money_rows():
 
 def test_printed_report_holds_no_keywords_thresholds_names_or_ibans():
     out = "\n".join(rc.format_rule_coverage(coverage()))
-    assert "best split" in out and "draft rules" in out and "links" in out
+    assert "best split" in out and "decisions proposed" in out and "links" in out
+    assert "Goeie doelen recall" in out
     assert "time of day" in out and "2024" in out
     for secret in (SAVINGS, PERSONAL, "bakker", "Bakker", "hema", "Hema", "Oma", "Jansen",
-                   "Webshop", "Tikkie", "45.00", "150.00", "3.25", r"\b"):
+                   "Webshop", "Tikkie", "Kerk", "Rots", "Café", "45.00", "150.00", "3.25", r"\b"):
         assert secret not in out
 
 
-def test_the_draft_file_is_private_and_ready_to_paste(tmp_path):
-    path = tmp_path / "draft.py"
+def test_the_draft_file_is_a_private_decision_table(tmp_path):
+    path = tmp_path / "draft.txt"
     rc.write_draft(coverage(), str(path))
-    text = path.read_text()
-    assert r'r"\bbakker\s+bart\b": ("{c}", ExpenseCategory.BOODSCHAPPEN),' in text
-    assert "IncomeCategory.GIFT" in text
+    lines = path.read_text().splitlines()
+    bakker = next(line for line in lines if "\tbakker bart\t" in line)
+    assert bakker.split("\t")[:4] == ["keep", bakker.split("\t")[1], "out", "Boodschappen"]
+    assert r"\bbakker\W+bart\b" in bakker
+    assert any(line.startswith("gd\t") and "\tkerk de\t" in line for line in lines)
+    assert any(line.startswith("review\t") and "\thema\t" in line for line in lines)
+    text = "\n".join(lines)
     assert SAVINGS in text and PERSONAL in text
     assert stat.S_IMODE(os.stat(path).st_mode) == 0o600
 

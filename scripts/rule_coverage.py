@@ -29,7 +29,9 @@ from eval_categoriser import _name, _pct, score
 
 GROUP_MIN = 3             # rows a counterparty group needs to be listed
 PURE_SHARE = 0.9          # a group this uniform is pure
-READY_SHARE = 0.8         # a group this uniform, stable across years, gets a draft rule
+READY_SHARE = 0.8         # a savings account this uniform is recognised as one
+KEEP_SHARE = 0.95         # a group this uniform, not shifting, is proposed as a plain rule
+GD_SHARE = 0.25           # a group this much Goeie doelen is proposed as `gd`
 GROUPS_SHOWN = 30         # groups listed per grouping
 MIRROR_DAYS = 7           # an opposite row this close is a mirror
 PATTERN_MAX = 60          # longest rule pattern printed
@@ -39,10 +41,11 @@ LINK_WINDOWS = (7, 14, 31)  # days between a pot transfer and the purchases it c
 LINK_MAX_ITEMS = 4        # purchases one pot transfer may cover
 
 UIT_SPAARPOTJE = "Uit spaarpotje"
+GOEIE_DOELEN = "Goeie doelen"
 SPAARREKENING = "Spaarrekening"
 VRIJ_GELD = "Persoonlijk vrij geld"
 
-KEY_TOKEN = re.compile(r"[a-z0-9]+")
+KEY_TOKEN = re.compile(r"[^\W_]+")      # letters and digits, accented ones too
 TIME_OF_DAY = re.compile(r"(?<![\d:])([01]\d|2[0-3]):[0-5]\d(?![\d:])")
 CODE_SHAPE = re.compile(r"^[A-Z]{2,4}$")
 WORD = re.compile(r"[a-z]{3,}")
@@ -454,8 +457,28 @@ def _groups(members, key_of, prefix):
     return groups
 
 
+def _latest_top(members):
+    by_year = defaultdict(Counter)
+    for rec, truth in members:
+        by_year[rec.label[3:]][truth] += 1
+    return _top(by_year[max(by_year)])
+
+
+def _propose(truths, share, stability, category):
+    """keep (plain rule), review (top category, always marked) or gd (Goeie doelen)."""
+    if truths[GOEIE_DOELEN] / sum(truths.values()) >= GD_SHARE:
+        return "gd"
+    if share >= KEEP_SHARE and stability != "shifts" and category == _top(truths):
+        return "keep"
+    return "review"
+
+
 def _draft(uncovered, name_groups):
-    """A rule per uniform, stable group and direction, tried on every uncovered row."""
+    """A proposed decision per name group and direction, tried on every uncovered row.
+
+    A group that shifted between years follows its latest year. `hits` and
+    `correct` count every uncovered row the pattern would catch.
+    """
     from constants import ExpenseCategory, IncomeCategory
     from finance_core.categorization_rules import search_text
     drafts = []
@@ -465,23 +488,35 @@ def _draft(uncovered, name_groups):
             if len(members) < GROUP_MIN:
                 continue
             truths = Counter(t for _, t in members)
-            category = _top(truths)
-            share = truths[category] / len(members)
-            if share < READY_SHARE or _stability(members) == "shifts":
-                continue
+            stability = _stability(members)
+            category = _latest_top(members) if stability == "shifts" else _top(truths)
+            share = truths[_top(truths)] / len(members)
+            decision = _propose(truths, share, stability, category)
+            if decision == "gd":
+                category = GOEIE_DOELEN
             enum = IncomeCategory if direction == "in" else ExpenseCategory
             member = next((f"{enum.__name__}.{m.name}" for m in enum if m.value == category), None)
             if member is None:
                 continue
-            pattern = r"\b" + r"\s+".join(re.escape(w) for w in g["key"].split()) + r"\b"
+            pattern = r"\b" + r"\W+".join(re.escape(w) for w in g["key"].split()) + r"\b"
             rx = re.compile(pattern, re.IGNORECASE)
             hits = [t for r, t in uncovered
                     if tx_direction(r.tx) == direction and rx.search(search_text(r.tx))]
-            drafts.append(dict(id=g["id"], key=g["key"], direction=direction, pattern=pattern,
-                               category=category, member=member, rows=len(members), share=share,
-                               stability=_stability(members), hits=len(hits),
+            drafts.append(dict(id=g["id"], key=g["key"], direction=direction, decision=decision,
+                               pattern=pattern, category=category, member=member, rows=len(members),
+                               share=share, truths=truths, stability=stability, hits=len(hits),
                                correct=sum(t == category for t in hits), names=g["names"]))
     return drafts
+
+
+def _watch(pairs, fired, rows, drafts):
+    """Goeie doelen recall: donations the rules catch and the proposals would add."""
+    caught = sum(1 for rule, row in zip(fired, rows)
+                 if rule and row["correct"] and row["truth"] == GOEIE_DOELEN)
+    proposed = [d for d in drafts if d["category"] == GOEIE_DOELEN]
+    return dict(total=sum(1 for _, t in pairs if t == GOEIE_DOELEN), by_rules=caught,
+                by_decisions=sum(d["truths"][GOEIE_DOELEN] for d in proposed),
+                marked_other=sum(d["rows"] - d["truths"][GOEIE_DOELEN] for d in proposed))
 
 
 def rule_coverage(records, truths, txs, spaarpot_names=()):
@@ -524,6 +559,7 @@ def rule_coverage(records, truths, txs, spaarpot_names=()):
     truth_of = {id(tx): truth for tx, truth in pairs}
     savings = savings_accounts(pairs)
     name_groups = _groups(uncovered, merchant_key, "N")
+    drafts = _draft(uncovered, name_groups)
     return dict(
         scored=len(records),
         rules=rules,
@@ -536,7 +572,8 @@ def rule_coverage(records, truths, txs, spaarpot_names=()):
         links={(w, k): find_links(txs, truth_of, savings, w, k)
                for w in LINK_WINDOWS for k in range(1, LINK_MAX_ITEMS + 1)},
         accounts=account_roles(pairs, savings),
-        draft=_draft(uncovered, name_groups),
+        draft=drafts,
+        watch=_watch(pairs, fired, rows, drafts),
     )
 
 
@@ -597,13 +634,22 @@ def format_rule_coverage(cov):
                                  f"({100 * split['majority']:.0f}%) by {100 * USEFUL_GAIN:.0f} points")
 
     d = cov["draft"]
-    hits, correct = sum(x["hits"] for x in d), sum(x["correct"] for x in d)
-    lines.append(f"draft rules (name groups at >= {100 * READY_SHARE:.0f}% one category, not shifting "
-                 f"between years): {len(d)} rules from {sum(x['rows'] for x in d)} group rows; "
-                 f"over all uncovered rows they hit {_pct(hits, correct)} correct")
+    kinds = Counter(x["decision"] for x in d)
+    rows_by = Counter()
     for x in d:
-        lines.append(f"  {x['id']} {x['direction']}: {x['rows']} rows at {100 * x['share']:.0f}%, "
+        rows_by[x["decision"]] += x["rows"]
+    keep = [x for x in d if x["decision"] == "keep"]
+    lines.append("decisions proposed per name group (change the first word in the draft file): " +
+                 ", ".join(f"{k} {kinds[k]} groups ({rows_by[k]} rows)" for k in ("keep", "review", "gd")) +
+                 f"; keep rules hit {_pct(sum(x['hits'] for x in keep), sum(x['correct'] for x in keep))} "
+                 "correct over all uncovered rows")
+    for x in d:
+        lines.append(f"  {x['id']} {x['direction']} {x['decision']}: {x['rows']} rows, top {100 * x['share']:.0f}%, "
                      f"{x['stability']}; hits {_pct(x['hits'], x['correct'])}")
+    w = cov["watch"]
+    lines.append(f"Goeie doelen recall (a missed donation costs a deduction): {w['total']} rows; "
+                 f"today's rules catch {w['by_rules']}; the proposals add {w['by_decisions']} "
+                 f"and would also mark {w['marked_other']} other rows as Goeie doelen")
 
     lines.append(f"pot transfer links (savings accounts found: {len(cov['savings'])}; a transfer links "
                  "when exactly one set of purchases in the window sums to it):")
@@ -653,15 +699,23 @@ def write_draft(cov, path):
         w = out.write
         w("# Rule draft from eval_categoriser --rules. PRIVATE: holds names, account numbers,\n"
           "# words and amounts from your rows. Delete or fix lines, then hand back what you keep.\n\n")
-        w(f"# 1. Ready rules: name groups at >= {100 * READY_SHARE:.0f}% one category, not shifting\n"
-          "#    between years. `hits` is over every row no rule covers today, so it shows what\n"
-          "#    else the pattern would catch. The description template is a placeholder.\n")
-        for direction, table in (("out", "CATEGORIZATION_RULES_EXPENSE"), ("in", "CATEGORIZATION_RULES_INCOME")):
-            w(f"\n# {table}\n")
-            for d in (x for x in cov["draft"] if x["direction"] == direction):
-                w(f'r"{d["pattern"]}": ("{{c}}", {d["member"]}),  # {d["id"]}: {d["rows"]} rows, '
-                  f'{100 * d["share"]:.0f}%, {d["stability"]}; hits {d["correct"]}/{d["hits"]}; '
-                  f'{_names(d["names"], 3)}\n')
+        w("# 1. Decisions, one line per counterparty group. Change the FIRST word:\n"
+          "#      keep    a plain rule: this category, not marked\n"
+          "#      review  this category, but always marked for you to check (multi-purpose shops)\n"
+          "#      gd      Goeie doelen, catching too much rather than too little; rows that are\n"
+          "#              less clearly a donation (e.g. a card payment) are marked\n"
+          "#      drop    no rule; the AI decides\n"
+          "#    You may also change the category. `hits` is over every row no rule covers today,\n"
+          "#    so it shows what else the pattern would catch. Proposals: keep at >= "
+          f"{100 * KEEP_SHARE:.0f}% one\n"
+          f"#    category not shifting between years; gd at >= {100 * GD_SHARE:.0f}% donations; review otherwise\n"
+          "#    (a group that shifted takes its latest year's category).\n")
+        w("# decision\tid\tdirection\tcategory\tkey\tpattern\trows\ttop share\tstability\thits\tcategories\tnames\n")
+        for d in cov["draft"]:
+            cats = ", ".join(f"{c} {k}" for c, k in d["truths"].most_common())
+            w(f"{d['decision']}\t{d['id']}\t{d['direction']}\t{d['category']}\t{d['key']}\t{d['pattern']}\t{d['rows']}\t"
+              f"{100 * d['share']:.0f}%\t{d['stability']}\t{d['correct']}/{d['hits']}\t{cats}\t"
+              f"{_names(d['names'], 3)}\n")
 
         w("\n# 2. Mixed groups: the single feature that splits each best (leave-one-out),\n"
           "#    fitted on all its rows. Check that it makes sense before it becomes a rule.\n")
