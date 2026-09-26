@@ -2024,6 +2024,48 @@ Phase 4). Phase 4 step 5 writes the whole backlog in one go, and
 threshold, and Sonnet over Haiku, were chosen without measuring. This step
 measures them on months where the right answer is already known.
 
+- Done 2026-09-26 (me), step 4, 510 tests green:
+  - `bot_commands.py` is the 4.8 surface: `/upload` (five attachments and
+    `force`), `/resume`, `/status`, `/cancel` (`confirm`), `/sort`
+    (`month`), `/months list` and `/months register` (`force`). `/review`,
+    `/pending`, `/cached` and `/resetsheet` are gone. `/upload` refuses a
+    non-CSV file, a user outside the household and a missing thread
+    before it saves anything. It saves the attachments as
+    `<n>-<basename>` under `data/uploads/<upload_id>/`, answers at once,
+    and runs the pipeline as a background task. Progress lines and the
+    summary go to the user's thread; the summary is split into embeds
+    within the 4,096 and 6,000 character caps, and `flagged_attachment`
+    rides on the last message as `flagged-<upload_id>.txt`.
+  - A `RunRefused` is a private reply, and on `/upload` the saved folder
+    is deleted: `process_upload` refuses only before it creates the run
+    state. Any other exception posts its type only to the thread, and the
+    log carries the type and traceback frames, never the message.
+  - `get_or_create_user_thread` moved unchanged to
+    `finance_core/discord_threads.py`; `discord_notifier` re-imports it
+    until step 5.
+  - `src/config_check.py` holds `REQUIRED_SETTINGS` (the 4.10 block plus
+    the Discord keys) and runs first in `bot.py`. It prints one line on
+    stderr and exits 1. The workstation's own config lacks the 4.10
+    block, so the bot refuses to start there until the block is copied in,
+    as intended. `on_ready` no longer starts the upload queue or
+    registers the persistent views.
+  - Tests: `tests/test_bot_commands.py`, with fake interactions, and one
+    test that loads the cog into a real `commands.Bot` tree and checks
+    Discord's name and description limits. A mutation pass (10 mutations)
+    is caught in full.
+
+  Decisions:
+  - (user) The thread lives in `REMINDER_CHANNEL_ID`'s channel, as
+    `/pending` already did. The old `Approvals-<name>` threads in the
+    approval channel stay where they are.
+  - (user) `/months list` and `/months register`: Discord cannot run a
+    command that has subcommands, so a bare `/months` plus
+    `/months register` cannot both exist.
+  - (me) Every command, not only `/upload` and `/resume`, is limited to
+    `MENTION_USER_IDS`: `/status` and the summary show flagged rows'
+    bank text, and `/cancel` and `/months register` change state.
+  - (me) `/months register` takes `force`, since the stale-sheet error
+    tells the user to re-point a label with it.
 - **Answer key: the 2024 and 2025 sheets.** The user checked these by hand.
   2026 is mostly AI-written, so scoring against it would largely measure the
   model against itself; it is excluded. The 2024/2025 sheets are not in

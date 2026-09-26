@@ -1,421 +1,407 @@
 # bot_commands.py
+"""
+Discord slash commands (plan 4.8).
 
-from pathlib import Path
+/upload saves up to five CSV exports and hands them to the Pipeline, which
+splits them into financial months and writes each month's sheet with no
+review step. The interaction token dies after 15 minutes, so the command
+answers at once and the run posts its progress and summary to the user's
+Approvals-<name> thread in the reminder channel. A refusal (RunRefused) is
+a private reply. Every command is limited to the household
+(MENTION_USER_IDS).
+"""
+
+import asyncio
+import io
+import logging
+import os
+import shutil
+import traceback
+from typing import Optional
+
 import discord
 from discord import app_commands
 from discord.ext import commands
-import os
-import logging
-import asyncio
-from finance_core.session_management import (
-    session_exists, load_session, clear_session
-)
-from finance_core.ui.cached_transactions_view import CachedTransactionsView
-from finance_core.export import process_csv_file
-from config.config_settings import UPLOAD_DIR
+
+from finance_core.config_access import project_path, setting
+from finance_core.discord_threads import get_or_create_user_thread
+from finance_core.export import Pipeline, RunRefused, RunReport, new_upload_id
+from finance_core.sheet_registry import SheetRegistryError
 
 logger = logging.getLogger(__name__)
 
+# Discord's caps: an embed description, all embeds of one message together,
+# and the number of embeds in one message.
+EMBED_LIMIT = 4096
+MESSAGE_LIMIT = 6000
+EMBEDS_PER_MESSAGE = 10
+SHEET_URL = "https://docs.google.com/spreadsheets/d/{}"
+
+
+# ── fitting text into Discord ───────────────────────────────────────────────
+
+def split_text(text: str, limit: int = EMBED_LIMIT) -> list:
+    """Cut text into pieces of at most ``limit`` characters.
+
+    Breaks fall between lines, and the newline at a break is dropped, so
+    "\\n".join(pieces) gives the text back. A single line longer than the
+    limit is cut mid-line; those cuts drop nothing.
+    """
+    pieces, current = [], None
+    for line in text.split("\n"):
+        while len(line) > limit:
+            if current is not None:
+                pieces.append(current)
+                current = None
+            pieces.append(line[:limit])
+            line = line[limit:]
+        if current is None:
+            current = line
+        elif len(current) + 1 + len(line) <= limit:
+            current += "\n" + line
+        else:
+            pieces.append(current)
+            current = line
+    if current is not None:
+        pieces.append(current)
+    return pieces
+
+
+def embed_messages(text: str, title: Optional[str] = None,
+                   colour: Optional[discord.Colour] = None) -> list:
+    """Keyword arguments for one or more send() calls that carry ``text``."""
+    embeds = [discord.Embed(description=piece or "​", colour=colour)
+              for piece in split_text(text)]
+    embeds[0].title = title
+    messages, batch, size = [], [], 0
+    for embed in embeds:
+        n = len(embed.description) + len(embed.title or "")
+        if batch and (size + n > MESSAGE_LIMIT
+                      or len(batch) == EMBEDS_PER_MESSAGE):
+            messages.append({"embeds": batch})
+            batch, size = [], 0
+        batch.append(embed)
+        size += n
+    messages.append({"embeds": batch})
+    return messages
+
+
+def summary_messages(report: RunReport) -> list:
+    """The run summary; the full flagged list rides on the last message."""
+    state = "complete" if report.complete else "incomplete"
+    colour = discord.Colour.green() if report.complete else discord.Colour.orange()
+    messages = embed_messages(report.text, f"Upload {report.upload_id}: {state}",
+                              colour)
+    if report.flagged_attachment:
+        messages[-1]["file"] = discord.File(
+            io.BytesIO(report.flagged_attachment.encode("utf-8")),
+            filename=f"flagged-{report.upload_id}.txt")
+    return messages
+
+
+def _safe_name(filename: str) -> str:
+    return os.path.basename(filename.replace("\\", "/")) or "upload.csv"
+
+
+# ── the cog ─────────────────────────────────────────────────────────────────
 
 class FinanceBot(commands.Cog):
-    def __init__(self, bot):
+    months = app_commands.Group(
+        name="months", description="The index of monthly budget sheets")
+
+    def __init__(self, bot, *, pipeline_factory=None, open_thread=None,
+                 household=None, upload_root=None):
         self.bot = bot
+        self._pipeline_factory = pipeline_factory or Pipeline.from_settings
+        self._pipeline = None
+        self._open_thread = open_thread or self._reminder_thread
+        self._household = household or (
+            lambda: list(setting("MENTION_USER_IDS", [])))
+        self._upload_root = upload_root or project_path(
+            setting("UPLOAD_DIR", "data/uploads"))
+        self._tasks = set()
+
+    # ── /upload and /resume ───────────────────────────────────────────────
+    @app_commands.command(
+        name="upload",
+        description="Upload up to five ASN CSV exports and write them to the monthly sheets")
+    @app_commands.describe(
+        attachment="An ASN CSV export",
+        attachment2="Another export (optional)",
+        attachment3="Another export (optional)",
+        attachment4="Another export (optional)",
+        attachment5="Another export (optional)",
+        force="Write even when the split looks suspicious (4.3)")
+    async def upload(self, interaction: discord.Interaction,
+                     attachment: discord.Attachment,
+                     attachment2: Optional[discord.Attachment] = None,
+                     attachment3: Optional[discord.Attachment] = None,
+                     attachment4: Optional[discord.Attachment] = None,
+                     attachment5: Optional[discord.Attachment] = None,
+                     force: bool = False):
+        attachments = [a for a in (attachment, attachment2, attachment3,
+                                   attachment4, attachment5) if a is not None]
+        if not await self._allowed(interaction):
+            return
+        not_csv = [a.filename for a in attachments
+                   if not a.filename.lower().endswith(".csv")]
+        if not_csv:
+            await self._private(
+                interaction, f"❌ Not a CSV file: {', '.join(not_csv)}. "
+                "Nothing was saved.")
+            return
+        pipeline = await self._get_pipeline(interaction)
+        if pipeline is None:
+            return
+        thread = await self._thread(interaction)
+        if thread is None:
+            return
+
+        upload_id = new_upload_id()
+        folder = os.path.join(self._upload_root, upload_id)
+        try:
+            files = await self._save(attachments, folder)
+        except Exception as e:
+            shutil.rmtree(folder, ignore_errors=True)
+            logger.error("Saving upload %s failed: %s", upload_id,
+                         type(e).__name__)
+            await self._private(
+                interaction, f"❌ Could not save the attachments "
+                f"({type(e).__name__}). Nothing was started.")
+            return
+
+        await self._private(
+            interaction, f"📥 Processing {len(files)} file(s) as upload "
+            f"{upload_id}; progress and the summary follow in your thread "
+            f"{getattr(thread, 'mention', '')}".rstrip())
+        self._spawn(self._run(
+            interaction, thread,
+            lambda progress: pipeline.process_upload(
+                upload_id, files, force=force, progress=progress),
+            refused_cleanup=folder))
 
     @app_commands.command(name="resume",
-                          description="Resume a previously paused finance session")
-    async def resume(self, interaction: discord.Interaction):
-        user_id = interaction.user.id
-        if not session_exists(user_id):
-            await interaction.response.send_message("❌ No session to resume.", ephemeral=True)
-            # Auto-delete after 3 seconds
-            response = await interaction.original_response()
-            asyncio.create_task(self._delete_after_delay(response, 3))
+                          description="Continue an unfinished upload run")
+    @app_commands.describe(
+        upload_id="The run to continue; the newest open run by default")
+    async def resume(self, interaction: discord.Interaction,
+                     upload_id: Optional[str] = None):
+        if not await self._allowed(interaction):
             return
+        pipeline = await self._get_pipeline(interaction)
+        if pipeline is None:
+            return
+        thread = await self._thread(interaction)
+        if thread is None:
+            return
+        await self._private(
+            interaction, "🔄 Resuming; progress and the summary follow in "
+            f"your thread {getattr(thread, 'mention', '')}".rstrip())
+        self._spawn(self._run(
+            interaction, thread,
+            lambda progress: pipeline.resume(upload_id, progress=progress)))
 
-        await interaction.response.send_message("🔄 Resuming session...", ephemeral=True)
-        await process_csv_file(file_path=None, ctx_or_interaction=interaction)
-
-    @app_commands.command(name="status",
-                          description="Check your current finance session status")
+    # ── /status, /cancel, /sort ───────────────────────────────────────────
+    @app_commands.command(
+        name="status",
+        description="Show every open upload run and what it has not written")
     async def status(self, interaction: discord.Interaction):
-        user_id = interaction.user.id
-        if not session_exists(user_id):
-            await interaction.response.send_message("❌ No active session.", ephemeral=True)
-            # Auto-delete after 3 seconds
-            response = await interaction.original_response()
-            asyncio.create_task(self._delete_after_delay(response, 3))
+        if not await self._allowed(interaction):
             return
-
-        remaining, income, expenses = load_session(user_id)
-        total_transactions = len(remaining) + len(income) + len(expenses)
-        processed = len(income) + len(expenses)
-        progress_percent = (processed / total_transactions) * \
-            100 if total_transactions > 0 else 0
-
-        status_msg = "📊 **Session Status**\n"
-        status_msg += f"⏳ Remaining: {len(remaining)} | "
-        status_msg += f"💵 Income: {len(income)} | "
-        status_msg += f"💸 Expenses: {len(expenses)}\n"
-        status_msg += f"📈 Progress: {progress_percent:.1f}% ({processed}/{total_transactions})"
-
-        # Note: Transactions are automatically uploaded to Google Sheets upon
-        # categorization
-        if processed > 0:
-            status_msg += f"\n✅ {processed} transactions automatically uploaded to Google Sheets"
-
-        await interaction.response.send_message(status_msg, ephemeral=True)
-        # Auto-delete after 8 seconds
-        response = await interaction.original_response()
-        asyncio.create_task(self._delete_after_delay(response, 8))
-
-    @app_commands.command(name="cancel",
-                          description="Cancel and delete your current session")
-    async def cancel(self, interaction: discord.Interaction):
-        user_id = interaction.user.id
-        if not session_exists(user_id):
-            await interaction.response.send_message("❌ No session to cancel.", ephemeral=True)
-            # Auto-delete after 3 seconds
-            response = await interaction.original_response()
-            asyncio.create_task(self._delete_after_delay(response, 3))
+        pipeline = await self._get_pipeline(interaction)
+        if pipeline is None:
             return
+        await self._private_embeds(interaction, pipeline.status(),
+                                   "Open runs")
 
-        clear_session(user_id)
-        await interaction.response.send_message("✅ Session canceled and data cleared.", ephemeral=True)
-        # Auto-delete after 5 seconds
-        response = await interaction.original_response()
-        asyncio.create_task(self._delete_after_delay(response, 5))
-
-    @app_commands.command(name="upload",
-                          description="Upload a CSV file to start processing transactions")
-    async def upload(self, interaction: discord.Interaction,
-                     attachment: discord.Attachment):
-        user_id = interaction.user.id
-
-        if session_exists(user_id):
-            await interaction.response.send_message("⚠️ Active session exists. Use `/cancel` first.", ephemeral=True)
-            # Auto-delete after 5 seconds
-            response = await interaction.original_response()
-            asyncio.create_task(self._delete_after_delay(response, 5))
+    @app_commands.command(
+        name="cancel",
+        description="Abandon an open upload run (never undoes a write)")
+    @app_commands.describe(
+        upload_id="The run to cancel; the newest open run by default",
+        confirm="Discard the rows the run has not written yet")
+    async def cancel(self, interaction: discord.Interaction,
+                     upload_id: Optional[str] = None, confirm: bool = False):
+        if not await self._allowed(interaction):
             return
-
-        if not attachment.filename.endswith(".csv"):
-            await interaction.response.send_message("❌ Please upload a CSV file.", ephemeral=True)
-            # Auto-delete after 4 seconds
-            response = await interaction.original_response()
-            asyncio.create_task(self._delete_after_delay(response, 4))
+        pipeline = await self._get_pipeline(interaction)
+        if pipeline is None:
             return
-
-        # Create user-specific filename to avoid conflicts
-        file_path = os.path.join(
-            UPLOAD_DIR, f"{user_id}_{attachment.filename}")
-        os.makedirs(UPLOAD_DIR, exist_ok=True)
-
         try:
-            await attachment.save(Path(file_path))
-            await interaction.response.send_message("📥 Processing CSV file...", ephemeral=True)
-            await process_csv_file(file_path=file_path, ctx_or_interaction=interaction)
+            message = pipeline.cancel(upload_id, confirm=confirm)
+        except RunRefused as e:
+            await self._private(interaction, f"❌ {e}")
+            return
+        await self._private(interaction, f"✅ {message}")
+
+    @app_commands.command(
+        name="sort", description="Sort monthly sheets by date")
+    @app_commands.describe(
+        month="MM/YYYY; by default every sheet the last run touched")
+    async def sort_sheet(self, interaction: discord.Interaction,
+                         month: Optional[str] = None):
+        if not await self._allowed(interaction):
+            return
+        pipeline = await self._get_pipeline(interaction)
+        if pipeline is None:
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            lines = await pipeline.sort([month] if month else None)
+        except RunRefused as e:
+            await self._private(interaction, f"❌ {e}")
+            return
         except Exception as e:
-            await interaction.response.send_message(f"❌ Error: {str(e)}", ephemeral=True)
-            # Auto-delete error after 8 seconds
-            response = await interaction.original_response()
-            asyncio.create_task(self._delete_after_delay(response, 8))
-            # Clean up file if it exists
-            if os.path.exists(file_path):
-                os.remove(file_path)
-
-    @app_commands.command(name="cached",
-                          description="View and process your cached transactions")
-    async def cached(self, interaction: discord.Interaction):
-        user_id = interaction.user.id
-
-        try:
-            from finance_core.session_management import get_cached_transactions
-            cached_transactions = get_cached_transactions(user_id)
-        except Exception as e:
-            await interaction.response.send_message(f"❌ Error loading cached transactions: {str(e)}", ephemeral=True)
+            logger.error("Sort failed: %s", type(e).__name__)
+            await self._private(interaction,
+                                f"❌ Sort failed ({type(e).__name__}).")
             return
+        await self._private_embeds(
+            interaction, "\n".join(lines) or "Nothing to sort.", "Sort")
 
-        if not cached_transactions:
-            await interaction.response.send_message("📦 No cached transactions found.", ephemeral=True)
-            # Auto-delete after 3 seconds
-            response = await interaction.original_response()
-            asyncio.create_task(self._delete_after_delay(response, 3))
+    # ── /months list, /months register ────────────────────────────────────
+    @months.command(name="list", description="List the month -> sheet index")
+    async def months_list(self, interaction: discord.Interaction):
+        if not await self._allowed(interaction):
             return
-
-        # Create summary of cached transactions
-        embed = discord.Embed(
-            title="📦 Cached Transactions",
-            description=f"You have {len(cached_transactions)} cached transaction(s)",
-            color=discord.Color.orange()
-        )
-
-        # Add up to 10 transactions to avoid embed limits
-        for i, cached_tx in enumerate(cached_transactions[:10]):
-            tx_type_emoji = "💵" if cached_tx["transaction_type"] == "income" else "💸"
-            embed.add_field(
-                name=f"{tx_type_emoji} {cached_tx['cache_id']} - {cached_tx['amount']} EUR",
-                value=f"**{cached_tx['auto_description'][:100]}{'...' if len(cached_tx['auto_description']) > 100 else ''}**\n"
-                      # Simple timestamp formatting
-                      f"📅 {cached_tx['timestamp'][:19].replace('T', ' ')}",
-                inline=False
-            )
-
-        if len(cached_transactions) > 10:
-            embed.add_field(
-                name="📋 More transactions",
-                value=f"... and {len(cached_transactions) - 10} more. Use the buttons below to process them.",
-                inline=False
-            )
-
-        # Add processing instructions
-        embed.add_field(
-            name="🔧 Next Steps",
-            value="Use **Process Cached** to categorize these transactions properly.\n"
-                  "Use **Clear All** to remove all cached transactions.\n"
-                  "⚠️ Processed transactions will replace the dummy entries in your Google Sheet.",
-            inline=False
-        )
-
-        # Create view with action buttons
-        view = CachedTransactionsView(user_id, cached_transactions)
-        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
-
-    @app_commands.command(name="review",
-                          description="Review auto-categorized transactions from current session")
-    async def review(self, interaction: discord.Interaction):
-        user_id = interaction.user.id
-
-        try:
-            from finance_core.session_management import get_auto_categorized_transactions
-            auto_cats = get_auto_categorized_transactions(user_id)
-        except Exception as e:
-            await interaction.response.send_message(f"❌ Error loading auto-categorizations: {str(e)}", ephemeral=True)
+        pipeline = await self._get_pipeline(interaction)
+        if pipeline is None:
             return
-
-        if not auto_cats:
-            await interaction.response.send_message("✅ No auto-categorized transactions in current session.", ephemeral=True)
-            # Auto-delete after 3 seconds
-            response = await interaction.original_response()
-            asyncio.create_task(self._delete_after_delay(response, 3))
+        months = pipeline.registry.list_months()
+        if not months:
+            await self._private(
+                interaction, "The index is empty; /months register adds a "
+                "sheet.")
             return
+        text = "\n".join(f"`{label}` {SHEET_URL.format(entry['id'])}"
+                         for label, entry in months)
+        await self._private_embeds(interaction, text, "Monthly sheets")
 
-        # Create summary embed
-        embed = discord.Embed(
-            title="🤖 Auto-Categorized Transactions",
-            description=f"Review {len(auto_cats)} automatically categorized transaction{'s' if len(auto_cats) > 1 else ''} from your current session.",
-            color=discord.Color.green()
-        )
-
-        # Add up to 10 transactions to avoid embed limits
-        for i, auto_cat in enumerate(auto_cats[:10]):
-            tx = auto_cat["transaction"]
-            amount = tx.get("transaction_amount", {}).get("amount", "0")
-            tx_type_emoji = "💵" if auto_cat["transaction_type"] == "income" else "💸"
-            method_emoji = "📋" if auto_cat["method"] == "regex" else "🤖"
-            confidence_pct = int(auto_cat["confidence"] * 100)
-
-            # Get counterparty name
-            counterparty = tx.get(
-                "creditor",
-                {}).get("name") or tx.get(
-                "debtor",
-                {}).get(
-                "name",
-                "Unknown")
-
-            embed.add_field(
-                name=f"{tx_type_emoji} {method_emoji} {counterparty} - €{amount}",
-                value=f"**{auto_cat['category']}** • {auto_cat['description'][:80]}{'...' if len(auto_cat['description']) > 80 else ''}\n"
-                      f"Confidence: {confidence_pct}%",
-                inline=False
-            )
-
-        if len(auto_cats) > 10:
-            embed.add_field(
-                name="📋 More transactions",
-                value=f"... and {len(auto_cats) - 10} more auto-categorized transactions.",
-                inline=False
-            )
-
-        # Add legend and notes
-        legend = "📋 = Regex matched | 🤖 = AI categorized\n"
-        legend += "💸 = Expense | 💵 = Income\n\n"
-        legend += "✅ All transactions shown have been uploaded to Google Sheets.\n"
-        legend += "⚠️ To correct a categorization, you'll need to edit it directly in your Google Sheet or use the background upload queue."
-
-        embed.add_field(
-            name="ℹ️ Legend & Notes",
-            value=legend,
-            inline=False
-        )
-
-        await interaction.response.send_message(embed=embed, ephemeral=True)
-        # Auto-delete after 60 seconds to keep chat clean
-        response = await interaction.original_response()
-        asyncio.create_task(self._delete_after_delay(response, 60))
-
-    @app_commands.command(name="pending",
-                          description="Resend notification for pending approval transactions")
-    async def pending(self, interaction: discord.Interaction):
-        """Show batch review overview for pending/remaining transactions."""
-        user_id = interaction.user.id
-
+    @months.command(name="register",
+                    description="Add a sheet the bot did not create")
+    @app_commands.describe(
+        label="The month, MM/YYYY",
+        url="The sheet's URL or spreadsheet id",
+        force="Re-point a label or sheet that is already registered")
+    async def months_register(self, interaction: discord.Interaction,
+                              label: str, url: str, force: bool = False):
+        if not await self._allowed(interaction):
+            return
+        pipeline = await self._get_pipeline(interaction)
+        if pipeline is None:
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
         try:
-            from finance_core.pending_transactions import (
-                get_user_pending_transactions, clear_user_pending
-            )
-            from finance_core.session_management import load_session, save_session
-            from finance_core.ui.discord_notifier import (
-                get_or_create_user_thread,
-                create_transaction_overview_embed,
-                BatchReviewView
-            )
-            from config.config_settings import REMINDER_CHANNEL_ID
-
-            # Merge pending queue items into session remaining
-            pending_queue = get_user_pending_transactions(user_id)
-            if pending_queue:
-                transactions_for_session = []
-                for item in pending_queue:
-                    tx = item["transaction"].copy()
-                    if item.get("ai_category"):
-                        tx["_ai_suggestion"] = {
-                            "category": item["ai_category"],
-                            "description": item.get("ai_description", ""),
-                            "confidence": item.get("ai_confidence", 0)
-                        }
-                    transactions_for_session.append(tx)
-
-                existing_remaining, existing_income, existing_expenses = load_session(user_id)
-                all_remaining = transactions_for_session + existing_remaining
-                save_session(user_id, all_remaining, existing_income, existing_expenses)
-                clear_user_pending(user_id)
-                logger.info(f"Merged {len(pending_queue)} pending queue items into session for user {user_id}")
-
-            # Load unified remaining list
-            remaining, _, _ = load_session(user_id)
-
-            if not remaining:
-                await interaction.response.send_message(
-                    "✅ No pending transactions to review.", ephemeral=True)
-                response = await interaction.original_response()
-                asyncio.create_task(self._delete_after_delay(response, 3))
-                return
-
-            await interaction.response.send_message(
-                f"📤 Sending overview for {len(remaining)} transactions...",
-                ephemeral=True)
-
-            # Get or create thread and send notification
-            channel = self.bot.get_channel(REMINDER_CHANNEL_ID)
-            if not channel:
-                await interaction.edit_original_response(
-                    content="❌ Could not find approval channel.")
-                return
-
-            thread = await get_or_create_user_thread(channel, user_id, self.bot)
-            if not thread:
-                await interaction.edit_original_response(
-                    content="❌ Could not create approval thread.")
-                return
-
-            embed = create_transaction_overview_embed(remaining, user_id)
-            view = BatchReviewView(user_id, len(remaining))
-            await thread.send(embed=embed, view=view)
-
-            await interaction.edit_original_response(
-                content=f"✅ Sent! Check your thread for {len(remaining)} transactions.")
-            response = await interaction.original_response()
-            asyncio.create_task(self._delete_after_delay(response, 5))
-
+            result = await asyncio.to_thread(
+                pipeline.registry.register, label, url, force=force)
+        except (SheetRegistryError, ValueError) as e:
+            await self._private(interaction, f"❌ {e}")
+            return
         except Exception as e:
-            logger.error(f"Error in /pending command: {e}", exc_info=True)
-            await interaction.edit_original_response(
-                content=f"❌ Error: {str(e)}")
+            logger.error("Register failed: %s", type(e).__name__)
+            await self._private(interaction,
+                                f"❌ Register failed ({type(e).__name__}).")
+            return
+        await self._private(interaction, f"✅ {label}: {result}")
 
-    @app_commands.command(name="resetsheet",
-                          description="Reset Google Sheets connection and re-detect row positions")
-    async def resetsheet(self, interaction: discord.Interaction):
-        """Reset the sheet exporter and re-detect row positions (owner only)"""
-        user_id = interaction.user.id
-
-        # Access control: only bot owners (from MENTION_USER_IDS) can use this
-        try:
-            from config.config_settings import MENTION_USER_IDS
-            if user_id not in MENTION_USER_IDS:
-                await interaction.response.send_message(
-                    "❌ Only bot owners can use this command.", ephemeral=True)
-                response = await interaction.original_response()
-                asyncio.create_task(self._delete_after_delay(response, 5))
-                return
-        except ImportError:
-            pass  # If config unavailable, allow anyone (dev mode)
-
-        await interaction.response.send_message(
-            "🔄 Resetting Google Sheets connection...", ephemeral=True)
+    # ── the background run ────────────────────────────────────────────────
+    async def _run(self, interaction, thread, start, refused_cleanup=None):
+        async def progress(line):
+            await thread.send(line)
 
         try:
-            from finance_core.background_upload import get_upload_queue
-
-            queue = get_upload_queue()
-
-            # Reset the exporter (forces full reconnection)
-            if queue.exporter:
-                queue.exporter.sheet = None
-                queue.exporter.client = None
-
-            # Reset and re-detect positions
-            queue.reset_row_positions(user_id)
-
-            result_msg = "✅ Sheet connection reset!\n"
-            result_msg += f"📍 Detected positions: expenses=row {queue.current_expense_row}, income=row {queue.current_income_row}"
-
-            await interaction.edit_original_response(content=result_msg)
-            response = await interaction.original_response()
-            asyncio.create_task(self._delete_after_delay(response, 15))
-
+            report = await start(progress)
+        except RunRefused as e:
+            # process_upload refuses only before it creates the run state,
+            # so no run refers to these files yet.
+            if refused_cleanup:
+                shutil.rmtree(refused_cleanup, ignore_errors=True)
+            await self._private(interaction, f"❌ {e}")
+            return
         except Exception as e:
-            logger.error(f"Error in /resetsheet command: {e}", exc_info=True)
-            await interaction.edit_original_response(
-                content=f"❌ Error: {str(e)}")
+            # The message could quote a row; log and post the type only.
+            logger.error("Run stopped on %s\n%s", type(e).__name__,
+                         "".join(traceback.format_tb(e.__traceback__)))
+            await thread.send(
+                f"❌ The run stopped on an unexpected {type(e).__name__}. "
+                "Its state is kept: /status shows what was written, "
+                "/resume continues.")
+            return
+        for message in summary_messages(report):
+            await thread.send(**message)
 
-    @app_commands.command(name="sort",
-                          description="Sort all transactions in Google Sheets by date")
-    async def sort_sheet(self, interaction: discord.Interaction):
-        """Manually trigger sorting of all transactions in Google Sheets by date"""
-        await interaction.response.send_message("📊 Sorting transactions by date...", ephemeral=True)
+    def _spawn(self, coro) -> None:
+        task = asyncio.create_task(coro)
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
 
-        try:
-            from finance_core.google_sheets import sort_google_sheet_transactions
+    async def drain(self) -> None:
+        """Wait for every background run (tests, and a clean shutdown)."""
+        while self._tasks:
+            await asyncio.gather(*list(self._tasks), return_exceptions=True)
 
-            # Run sort in executor to not block event loop
-            loop = asyncio.get_event_loop()
-            expense_sorted, income_sorted = await loop.run_in_executor(
-                None, sort_google_sheet_transactions
-            )
+    # ── helpers ───────────────────────────────────────────────────────────
+    async def _allowed(self, interaction) -> bool:
+        if interaction.user.id in self._household():
+            return True
+        await self._private(interaction,
+                            "❌ Only the household can use this bot.")
+        return False
 
-            result_msg = "✅ Sort complete!\n"
-            result_msg += f"📊 Sorted {expense_sorted} expense rows and {income_sorted} income rows by date."
+    async def _get_pipeline(self, interaction):
+        if self._pipeline is None:
+            try:
+                self._pipeline = self._pipeline_factory()
+            except Exception as e:
+                logger.error("Pipeline setup failed: %s", type(e).__name__)
+                await self._private(
+                    interaction, f"❌ The bot cannot reach its sheets: "
+                    f"{type(e).__name__}: {e}")
+                return None
+        return self._pipeline
 
-            await interaction.edit_original_response(content=result_msg)
-            # Auto-delete after 10 seconds
-            response = await interaction.original_response()
-            asyncio.create_task(self._delete_after_delay(response, 10))
+    async def _thread(self, interaction):
+        thread = await self._open_thread(interaction.user)
+        if thread is None:
+            await self._private(
+                interaction, "❌ Could not open your progress thread (can the "
+                "bot create private threads in the reminder channel?). "
+                "Nothing was saved.")
+        return thread
 
-        except Exception as e:
-            logger.error(f"Error sorting sheet: {e}", exc_info=True)
-            await interaction.edit_original_response(content=f"❌ Error sorting sheet: {str(e)}")
-            # Auto-delete after 10 seconds
-            response = await interaction.original_response()
-            asyncio.create_task(self._delete_after_delay(response, 10))
+    async def _reminder_thread(self, user):
+        channel = self.bot.get_channel(setting("REMINDER_CHANNEL_ID"))
+        if channel is None:
+            logger.error("Reminder channel not found")
+            return None
+        return await get_or_create_user_thread(channel, user.id, self.bot)
 
-    async def _delete_after_delay(self, message, delay: int):
-        """Delete a message after a delay"""
-        await asyncio.sleep(delay)
-        try:
-            await message.delete()
-        except BaseException:
-            pass  # Message might already be deleted
+    @staticmethod
+    async def _save(attachments, folder) -> list:
+        """Save in attachment order; the index prefix keeps names unique."""
+        os.makedirs(folder, exist_ok=True)
+        files = []
+        for i, attachment in enumerate(attachments, start=1):
+            path = os.path.join(folder, f"{i}-{_safe_name(attachment.filename)}")
+            await attachment.save(path)
+            files.append(path)
+        return files
+
+    @staticmethod
+    async def _private(interaction, content: str) -> None:
+        if interaction.response.is_done():
+            await interaction.followup.send(content, ephemeral=True)
+        else:
+            await interaction.response.send_message(content, ephemeral=True)
+
+    @staticmethod
+    async def _private_embeds(interaction, text: str, title: str) -> None:
+        for message in embed_messages(text, title):
+            if interaction.response.is_done():
+                await interaction.followup.send(ephemeral=True, **message)
+            else:
+                await interaction.response.send_message(ephemeral=True,
+                                                        **message)
 
 
 async def setup(bot):

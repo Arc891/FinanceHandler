@@ -1,13 +1,17 @@
 # Modern bot.py - Updated to work with slash commands and bot_commands.py
 
-import os
 import discord
 from discord.ext import commands, tasks
 import asyncio
 import logging
 from datetime import datetime
 from zoneinfo import ZoneInfo
-from config.config_settings import DISCORD_TOKEN, DAILY_REMINDER_TIME, REMINDER_CHANNEL_ID, MENTION_USER_IDS, CSV_DOWNLOAD_LINK, TIMEZONE
+from config_check import check_required_settings
+
+# Before any config import: an outdated config stops here with one line.
+check_required_settings()
+
+from config.config_settings import DISCORD_TOKEN, DAILY_REMINDER_TIME, REMINDER_CHANNEL_ID, MENTION_USER_IDS, CSV_DOWNLOAD_LINK, TIMEZONE  # noqa: E402
 
 # Set up logging with unified format and colors
 
@@ -81,63 +85,6 @@ logger.info("✅ Bot instance created")
 async def on_ready():
     logger.info(
         f"🤖 {bot.user} connected to Discord ({len(bot.guilds)} guilds)")
-
-    # Start Google Sheets upload queue
-    try:
-        from finance_core.background_upload import start_upload_queue
-        start_upload_queue()
-        logger.info("✅ Google Sheets upload queue started")
-    except Exception as e:
-        logger.error(f"❌ Failed to start upload queue: {e}")
-
-    # Register persistent views for pending review buttons
-    try:
-        from finance_core.ui.discord_notifier import PendingReviewView
-        from finance_core.pending_transactions import load_pending_queue
-
-        queue = load_pending_queue()
-
-        # Group pending by user to create one view per user
-        user_pending: dict = {}
-        for approval_id, item in queue.get("pending", {}).items():
-            uid = item["user_id"]
-            if uid not in user_pending:
-                user_pending[uid] = 0
-            user_pending[uid] += 1
-
-        if user_pending:
-            for user_id, count in user_pending.items():
-                view = PendingReviewView(user_id=user_id, pending_count=count)
-                bot.add_view(view)
-            logger.info(
-                f"✅ Registered persistent review view(s) for {len(user_pending)} user(s)")
-        else:
-            logger.info("ℹ️ No pending reviews to register")
-    except Exception as e:
-        logger.error(f"❌ Failed to register persistent views: {e}")
-
-    # Register persistent BatchReviewView for users with session remaining
-    try:
-        import glob
-        from finance_core.ui.discord_notifier import BatchReviewView
-        from finance_core.session_management import SESSION_DIR, load_session
-
-        batch_registered = 0
-        for session_file in glob.glob(os.path.join(SESSION_DIR, "*.json")):
-            try:
-                uid = int(os.path.basename(session_file).replace(".json", ""))
-                remaining, _, _ = load_session(uid)
-                if remaining:
-                    view = BatchReviewView(user_id=uid, transaction_count=len(remaining))
-                    bot.add_view(view)
-                    batch_registered += 1
-            except (ValueError, Exception) as e:
-                logger.debug(f"Skipping session file {session_file}: {e}")
-
-        if batch_registered:
-            logger.info(f"✅ Registered BatchReviewView for {batch_registered} user(s)")
-    except Exception as e:
-        logger.error(f"❌ Failed to register batch review views: {e}")
 
     # Load the finance commands cog
     try:
