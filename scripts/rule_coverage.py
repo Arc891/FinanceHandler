@@ -58,6 +58,9 @@ SPAARREKENING = "Spaarrekening"
 VRIJ_GELD = "Persoonlijk vrij geld"
 
 KEY_TOKEN = re.compile(r"[^\W_]+")      # letters and digits, accented ones too
+# Between two key words in a pattern: what KEY_TOKEN splits on, and any
+# one-letter word the key left out (an initial: `jan p. bakker`).
+KEY_GAP = r"[\W_]+(?:[^\W_][\W_]+)*"
 TIME_OF_DAY = re.compile(r"(?<![\d:])([01]\d|2[0-3]):[0-5]\d(?![\d:])")
 CODE_SHAPE = re.compile(r"^[A-Z]{2,4}$")
 WORD = re.compile(r"[a-z]{3,}")
@@ -563,7 +566,7 @@ def _draft(uncovered, name_groups, window):
                 decision = "split" if split else "review"
             if decision in ("keep", "review", "gd") and category not in names:
                 continue
-            pattern = r"\b" + r"\W+".join(re.escape(w) for w in g["key"].split()) + r"\b"
+            pattern = r"\b" + KEY_GAP.join(re.escape(w) for w in g["key"].split()) + r"\b"
             rx = re.compile(pattern, re.IGNORECASE)
             decide = _decider(decision, category, split)
             written = [(decide(r.tx)[0], t) for r, t in uncovered if r.label in inside and

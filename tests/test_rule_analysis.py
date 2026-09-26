@@ -277,7 +277,7 @@ def decisions():
 def test_a_uniform_group_is_proposed_as_a_plain_rule_with_word_bounds():
     bakker = decisions()["bakker bart"]
     assert bakker["decision"] == "keep"
-    assert bakker["pattern"] == r"\bbakker\W+bart\b"
+    assert bakker["pattern"] == r"\bbakker" + rc.KEY_GAP + r"bart\b"
     assert bakker["member"] == "ExpenseCategory.BOODSCHAPPEN"
     # Over every uncovered row: the Tikkie row matches too, Bartholomeus not.
     assert (bakker["hits"], bakker["correct"]) == (4, 4)
@@ -293,6 +293,14 @@ def test_a_mixed_group_is_proposed_for_review_under_its_top_category():
     """Kruidvat-like shops: most common category, always marked for review."""
     hema = decisions()["hema"]
     assert hema["decision"] == "review"
+
+
+def test_a_pattern_skips_an_initial_the_key_left_out():
+    """The key drops one-letter words, so the pattern must step over them."""
+    data = [(tx(f"0{d}-03-2025", f"{d}.00", name=n), "Persoonlijk vrij geld")
+            for d, n in ((4, "Jan P Bakker"), (5, "JAN P. BAKKER"), (6, "Jan_Bakker"))]
+    (draft,) = coverage(data)["draft"]
+    assert draft["key"] == "jan bakker" and (draft["hits"], draft["correct"]) == (3, 3)
 
 
 def test_a_group_that_shifted_follows_its_latest_year():
@@ -347,7 +355,7 @@ def test_the_draft_file_is_a_private_decision_table(tmp_path):
     lines = path.read_text().splitlines()
     bakker = next(line for line in lines if "\tbakker bart\t" in line)
     assert bakker.split("\t")[:4] == ["keep", bakker.split("\t")[1], "out", "Boodschappen"]
-    assert r"\bbakker\W+bart\b" in bakker
+    assert r"\bbakker" + rc.KEY_GAP + r"bart\b" in bakker
     assert any(line.startswith("gd\t") and "\tkerk de\t" in line for line in lines)
     assert any(line.startswith("review\t") and "\thema\t" in line for line in lines)
     text = "\n".join(lines)
