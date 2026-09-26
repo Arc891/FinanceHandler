@@ -42,15 +42,18 @@ USEFUL_GAIN = 0.10        # a split (leave-one-out) must beat the top category's
 KEYWORD_CANDIDATES = 40   # most frequent words tried as a keyword split
 LINK_WINDOWS = (7, 14, 31)  # days between a pot transfer and the purchases it covers
 LINK_MAX_ITEMS = 4        # purchases one pot transfer may cover
-RECENT_MONTHS = 12        # proposals rest on the last this many sheet months in the data
+RECENT_MONTHS = 12        # proposals rest on the last this many sheet months, unless given a start
+REVIEW_SHARE = 0.8        # a group nothing separates is marked from this share; below it, the AI decides
+RECURRING_MONTHS = 3      # an amount paid in this many different months is a recurring one
 SPLIT_EXCLUDED = ("year",)  # a future row is always in a new year, so no rule splits on it
 # Rows left to the AI, at the last Sonnet run's rates (2026-09-26, 0.75
 # threshold): 529 of 990 flagged, 155 of 990 written wrong and unflagged.
 AI_FLAG_RATE = 529 / 990
 AI_SILENT_WRONG_RATE = 155 / 990
 AI = "ai"                 # a split branch that leaves the row to the AI
-DROP_WHY = {"not seen": f"not seen in {RECENT_MONTHS} months",
-            "too few": f"fewer than {GROUP_MIN} recent rows"}
+DROP_WHY = {"not seen": "not seen in the window",
+            "too few": f"fewer than {GROUP_MIN} rows in the window",
+            "mixed": f"below {100 * REVIEW_SHARE:.0f}% one category, nothing separates the rows"}
 
 UIT_SPAARPOTJE = "Uit spaarpotje"
 GOEIE_DOELEN = "Goeie doelen"
@@ -203,13 +206,21 @@ def _key_threshold(rows, value_of, fmt):
 
 
 def _key_recurring(rows):
-    """Whether the amount is the group's most repeated one (a fixed transfer)."""
-    amounts = Counter(tx_amount(tx) for tx, _ in rows if tx_amount(tx) is not None)
-    repeated = [a for a, n in amounts.items() if n >= 2]
-    if not repeated:
+    """Whether the amount is one the group paid in RECURRING_MONTHS different months.
+
+    A fixed transfer that changed once (free money went up) recurs at both
+    amounts.
+    """
+    months = defaultdict(set)
+    for tx, _ in rows:
+        amount, day = tx_amount(tx), _day(tx)
+        if amount is not None and day is not None:
+            months[amount].add((day.year, day.month))
+    fixed = {a for a, seen in months.items() if len(seen) >= RECURRING_MONTHS}
+    if not fixed:
         return _constant(rows)
-    modal = min(repeated, key=lambda a: (-amounts[a], a))
-    return (lambda tx: tx_amount(tx) == modal), (lambda v: f"{'at' if v else 'not at'} {modal:.2f}")
+    shown = "/".join(f"{a:.2f}" for a in sorted(fixed))
+    return (lambda tx: tx_amount(tx) in fixed), (lambda v: f"{'at' if v else 'not at'} {shown}")
 
 
 def _key_keyword(rows, words_of):
@@ -481,10 +492,16 @@ def _latest_top(members):
     return _top(by_year[max(by_year)])
 
 
-def _window(records):
-    """The last RECENT_MONTHS sheet months ("MM/YYYY") present in the data."""
-    labels = {r.label for r in records}
-    return sorted(labels, key=lambda label: (label[3:], label[:2]))[-RECENT_MONTHS:]
+def _month_order(label):
+    return label[3:], label[:2]
+
+
+def _window(records, since=None):
+    """The sheet months ("MM/YYYY") present in the data from `since`, or the last RECENT_MONTHS."""
+    labels = sorted({r.label for r in records}, key=_month_order)
+    if since:
+        return [label for label in labels if _month_order(label) >= _month_order(since)]
+    return labels[-RECENT_MONTHS:]
 
 
 def _conditional(pairs, known):
@@ -530,7 +547,8 @@ def _draft(uncovered, name_groups, window):
 
     Decided on the group's rows in `window`: `drop` when it has none there
     or fewer than GROUP_MIN, then `gd`, `keep`, a `split` on one feature a
-    rule can check, and `review` when nothing separates the rows. A group
+    rule can check, and when nothing separates the rows `review` from
+    REVIEW_SHARE one category, else `drop` (the AI decides). A group
     that shifted between years follows its latest year. `hits` and
     `correct` count every uncovered row in `window` the pattern would
     write a category for, its own and other groups'.
@@ -563,7 +581,12 @@ def _draft(uncovered, name_groups, window):
                 decision = "keep"
             else:
                 split = _conditional([(r.tx, t) for r, t in recent], lambda c: c in names)
-                decision = "split" if split else "review"
+                if split:
+                    decision = "split"
+                elif share >= REVIEW_SHARE:
+                    decision = "review"
+                else:
+                    decision, why = "drop", "mixed"
             if decision in ("keep", "review", "gd") and category not in names:
                 continue
             pattern = r"\b" + KEY_GAP.join(re.escape(w) for w in g["key"].split()) + r"\b"
@@ -625,8 +648,12 @@ def _watch(pairs, fired, rows, drafts):
                 marked_other=sum(d["rows"] - d["truths"][GOEIE_DOELEN] for d in proposed))
 
 
-def rule_coverage(records, truths, txs, spaarpot_names=()):
-    """The regex pass alone, scored, plus what the uncovered rows have in common."""
+def rule_coverage(records, truths, txs, spaarpot_names=(), since=None):
+    """The regex pass alone, scored, plus what the uncovered rows have in common.
+
+    Proposals rest on the sheet months from `since` ("MM/YYYY"), or the last
+    RECENT_MONTHS without it.
+    """
     from finance_core.categorization_rules import first_matching_rule
     fired = [first_matching_rule(r.tx) for r in records]
     results = [SimpleNamespace(category=rule.category.value, method="regex", confidence=1.0)
@@ -665,7 +692,7 @@ def rule_coverage(records, truths, txs, spaarpot_names=()):
     truth_of = {id(tx): truth for tx, truth in pairs}
     savings = savings_accounts(pairs)
     name_groups = _groups(uncovered, merchant_key, "N")
-    window = _window(records)
+    window = _window(records, since)
     drafts = _draft(uncovered, name_groups, window)
     return dict(
         scored=len(records),
@@ -694,6 +721,10 @@ def _share(counter, n):
 
 def _years(years):
     return ", ".join(f"{y} {ok}/{n}" for y, (n, ok) in sorted(years.items()))
+
+
+def _span(window):
+    return f"{window[0]} to {window[-1]} ({len(window)} sheet months)" if window else "(no months)"
 
 
 def format_rule_coverage(cov):
@@ -749,7 +780,7 @@ def format_rule_coverage(cov):
         rows_by[x["decision"]] += x["recent"]
     why = Counter(x["why"] for x in d if x["decision"] == "drop")
     plain = [x for x in d if x["decision"] in ("keep", "split")]
-    lines.append(f"decisions proposed per name group, from the last {len(cov['window'])} sheet months "
+    lines.append(f"decisions proposed per name group, from the window {_span(cov['window'])} "
                  "(change the first word in the draft file): " +
                  ", ".join(f"{k} {kinds[k]} groups ({rows_by[k]} recent rows)"
                            for k in ("keep", "split", "review", "gd", "drop")) +
@@ -767,7 +798,7 @@ def format_rule_coverage(cov):
                      f"top {100 * x['share']:.0f}%, {x['stability']}; writes {_pct(x['hits'], x['correct'])}")
     p = cov["projection"]
     months = p["months"] or 1
-    lines.append(f"per month over the last {p['months']} sheet months: rows that need you (marked, plus what "
+    lines.append(f"per month over the window ({p['months']} sheet months): rows that need you (marked, plus what "
                  f"the AI flags) and rows written wrong unmarked; rows left to the AI count at the last Sonnet "
                  f"run's rates ({100 * AI_FLAG_RATE:.0f}% flagged, {100 * AI_SILENT_WRONG_RATE:.0f}% wrong "
                  "unflagged), and the rows left after new rules are harder, so likely more:")
@@ -844,13 +875,13 @@ def write_draft(cov, path):
           "#      drop    no rule; the AI decides\n"
           "#    You may also change the category or a branch. `written` is over every recent row no\n"
           "#    rule covers today, so it shows what else the pattern would catch. Proposals rest on the\n"
-          f"#    last {len(cov['window'])} sheet months ({', '.join(cov['window'][:1] + cov['window'][-1:])}): "
-          f"drop when a group has fewer than {GROUP_MIN}\n"
+          f"#    window {_span(cov['window'])}: drop when a group has fewer than {GROUP_MIN}\n"
           f"#    rows there; gd at >= {100 * GD_SHARE:.0f}% donations; keep at >= {100 * KEEP_SHARE:.0f}% one "
           "category, not shifting\n"
           "#    between years; split when one feature (not the year) gives a branch of "
           f"{GROUP_MIN}+ rows at >= {100 * KEEP_SHARE:.0f}%;\n"
-          "#    review otherwise (a group that shifted takes its latest year's category).\n"
+          f"#    review otherwise from {100 * REVIEW_SHARE:.0f}% one category, drop below it (a group that shifted\n"
+          "#    takes its latest year's category). Put multi-purpose shops you know back to review.\n"
           "#    `recent` and `top share` are over those months; `categories` too (all rows for a drop).\n")
         w("# decision\tid\tdirection\tcategory\tkey\tpattern\tbranches\trecent\trows\ttop share\tstability\t"
           "written\tcategories\tnames\n")

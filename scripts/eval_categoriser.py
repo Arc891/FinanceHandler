@@ -526,6 +526,12 @@ def parse_pair(arg):
     return key.strip(), value.strip()
 
 
+def parse_month(arg):
+    if not re.fullmatch(r"(0[1-9]|1[0-2])/\d{4}", arg):
+        raise argparse.ArgumentTypeError(f"expected a sheet month MM/YYYY, got {arg!r}")
+    return arg
+
+
 def load_exports(paths):
     from finance_core.csv_helper import load_transactions_from_csv
     from finance_core.ledger import collapse_within_upload
@@ -578,7 +584,7 @@ def run(args, counter):
         say(line)
     if args.rules:
         import rule_coverage as rc
-        cov = rc.rule_coverage(m.records, m.truths, txs, rc.spaarpot_names())
+        cov = rc.rule_coverage(m.records, m.truths, txs, rc.spaarpot_names(), since=args.recent_from)
         say("")
         for line in rc.format_rule_coverage(cov):
             say(line)
@@ -638,6 +644,9 @@ def main(argv=None) -> int:
                         help="regex only: rule precision and where new rules would help")
     parser.add_argument("--names-out", metavar="PATH",
                         help="with --rules: write group names and IBANs here (0600), never printed")
+    parser.add_argument("--recent-from", type=parse_month, metavar="MM/YYYY",
+                        help="with --rules: base the proposals on the sheet months from this one "
+                             "(default: the last 12)")
     parser.add_argument("--draft-out", metavar="PATH",
                         help="with --rules: write draft rules, splits and account roles here (0600)")
     parser.add_argument("--debug", action="store_true",

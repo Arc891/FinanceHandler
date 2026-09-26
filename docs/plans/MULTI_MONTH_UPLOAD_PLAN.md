@@ -2412,6 +2412,25 @@ measures them on months where the right answer is already known.
     rows written wrong unmarked (rule and plain errors plus 16 % of the AI
     rows), today against the proposals. The draft file gains `branches`
     (the fitted split, with its amount or word) and `recent` columns.
+  - Third real run (2026-09-26): today 28.6 rows a month need the user
+    and 13.5 are written wrong unmarked; the proposals 34.7 (23.2 marked)
+    and 9.1. Keep and split rules wrote 56 / 56 right, but 27 `review`
+    groups (many at 27-60 % top share) marked about 17 rows a month.
+    Three keep groups, N01 (the savings account, 100 rows) among them,
+    matched none of their own rows: the key drops one-letter words, so
+    `\bjan\W+bakker\b` missed `jan p. bakker`; N01's rows then fell to
+    N17's `review` pattern (74 incoming rows caught, 4 its own). Fixed:
+    patterns step over initials and underscores.
+  - User decisions (2026-09-26): `review` only from 80 % one category,
+    below it the AI decides (the user puts known multi-purpose shops back
+    to `review`); the free money amount changed once and has held since;
+    the household moved in January 2025 and finances were mostly regular
+    from February, so the window starts at `02/2025`.
+  - Done 2026-09-26 (me), 621 tests green: a group nothing separates is
+    `review` from 80 % (`REVIEW_SHARE`), else `drop` (`mixed`); a
+    recurring amount is any amount paid in 3 or more different months,
+    so both free money amounts count; `--recent-from MM/YYYY` starts the
+    window (default the last 12 sheet months).
   - Holdout: 2026 is not looked at while choosing rules. Once the rules
     are in, the 2026 months already categorised by hand (January to
     21 May) score them, with an export of those months (`--years 2026`).

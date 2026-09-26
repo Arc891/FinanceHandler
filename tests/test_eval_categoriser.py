@@ -7,6 +7,7 @@ the report holds counts and category names only, log messages never reach
 the terminal, and a crash prints no exception text. All data is synthetic.
 """
 
+import argparse
 import asyncio
 import logging
 from types import SimpleNamespace
@@ -294,6 +295,16 @@ def test_sheet_names_select_the_requested_years():
 ])
 def test_map_argument_splits_on_the_first_equals_sign(arg, expected):
     assert ev.parse_pair(arg) == expected
+
+
+@pytest.mark.parametrize("arg", ["2/2025", "02-2025", "13/2025", "2025/02"])
+def test_a_malformed_start_month_is_refused(arg):
+    with pytest.raises(argparse.ArgumentTypeError):
+        ev.parse_month(arg)
+
+
+def test_a_start_month_is_kept_as_written():
+    assert ev.parse_month("02/2025") == "02/2025"
 
 
 class FakeBook:

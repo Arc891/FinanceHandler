@@ -248,10 +248,10 @@ DATA = [
 ]
 
 
-def coverage(data=DATA):
+def coverage(data=DATA, since=None):
     txs = [t for t, _ in data]
     m = ev.match_rows(txs, [row(t, c) for t, c in data], VALID, {})
-    return rc.rule_coverage(m.records, m.truths, txs, spaarpot_names=[])
+    return rc.rule_coverage(m.records, m.truths, txs, spaarpot_names=[], since=since)
 
 
 def test_rule_precision_is_split_per_year():
@@ -289,10 +289,10 @@ def test_a_pattern_matches_its_own_rows_despite_hyphens_and_accents():
     assert (cafe["hits"], cafe["correct"]) == (3, 3)
 
 
-def test_a_mixed_group_is_proposed_for_review_under_its_top_category():
-    """Kruidvat-like shops: most common category, always marked for review."""
+def test_a_mixed_group_below_the_review_share_goes_to_the_ai():
+    """Marking rows whose top category is right half the time costs more than the AI."""
     hema = decisions()["hema"]
-    assert hema["decision"] == "review"
+    assert (hema["decision"], hema["why"]) == ("drop", "mixed")
 
 
 def test_a_pattern_skips_an_initial_the_key_left_out():
@@ -357,7 +357,8 @@ def test_the_draft_file_is_a_private_decision_table(tmp_path):
     assert bakker.split("\t")[:4] == ["keep", bakker.split("\t")[1], "out", "Boodschappen"]
     assert r"\bbakker" + rc.KEY_GAP + r"bart\b" in bakker
     assert any(line.startswith("gd\t") and "\tkerk de\t" in line for line in lines)
-    assert any(line.startswith("review\t") and "\thema\t" in line for line in lines)
+    assert any(line.startswith("drop\t") and "\thema\t" in line for line in lines)
+    assert any(line.startswith("review\t") and "\tkiosk\t" in line for line in lines)
     text = "\n".join(lines)
     assert SAVINGS in text and PERSONAL in text
     assert stat.S_IMODE(os.stat(path).st_mode) == 0o600
@@ -406,6 +407,9 @@ RECENT = [
       for d, c in zip((7, 8, 9, 10, 11), ("Huishouden",) * 4 + ("Cadeautjes",))],
     *[(tx(f"{d:02d}-07-2025", "10.00", name="Tweeluik", code="1 IDE"), c)
       for d, c in zip((14, 15, 16, 17, 18), ("Cadeautjes",) * 4 + ("Huishouden",))],
+    # A multi-purpose shop at 80 %: marked under its top category.
+    *[(tx(f"{d:02d}-09-2025", "10.00", name="Tuincentrum", rem="x"), c)
+      for d, c in zip((1, 2, 3, 4, 5), ("Huishouden",) * 4 + ("Cadeautjes",))],
     # Donations by iDEAL, one card payment in the church shop.
     (tx("02-06-2025", "20.00", name="Kerk Het Licht", code="1 IDE"), "Goeie doelen"),
     (tx("09-06-2025", "25.00", name="Kerk Het Licht", code="1 IDE"), "Goeie doelen"),
@@ -457,30 +461,36 @@ def test_the_transaction_code_splits_a_group_into_two_categories():
     assert (gym["hits"], gym["correct"]) == (8, 8)
 
 
-def test_a_group_nothing_separates_stays_review():
-    assert recent()["warenhuis"]["decision"] == "review"
-    assert recent()["warenhuis"]["split"] is None
+def test_a_group_nothing_separates_is_marked_from_the_review_share():
+    """Kruidvat-like shops: most common category, always marked for review."""
+    assert rc.REVIEW_SHARE == 0.8
+    shop = recent()["tuincentrum"]
+    assert (shop["decision"], shop["category"], shop["split"]) == ("review", "Huishouden", None)
 
 
-def test_a_split_that_leaves_every_branch_mixed_stays_review():
-    assert recent()["tweeluik"]["decision"] == "review"
+def test_a_group_nothing_separates_below_the_review_share_is_dropped():
+    assert (recent()["warenhuis"]["decision"], recent()["warenhuis"]["why"]) == ("drop", "mixed")
+
+
+def test_a_split_that_leaves_every_branch_mixed_is_not_a_split():
+    assert recent()["tweeluik"]["decision"] == "drop"
 
 
 def test_the_projection_counts_what_would_still_need_the_user():
     """Over the window: today's rules, the proposals, and what the AI gets."""
     p = coverage(RECENT)["projection"]
     assert p["months"] == 12
-    assert p["today"] == dict(rules=2, rules_wrong=1, plain=0, plain_wrong=0, marked=0, ai=48)
+    assert p["today"] == dict(rules=2, rules_wrong=1, plain=0, plain_wrong=0, marked=0, ai=53)
     # Plain: 12 free money, 4 Buurtwinkel, 8 Sportschool, 2 donations.
-    # Marked: 6 Warenhuis, 10 Tweeluik, the card payment at the church.
-    # AI: 4 repayments, the one recent Verhuisd Bakkerij row.
-    assert p["proposed"] == dict(rules=2, rules_wrong=1, plain=26, plain_wrong=0, marked=17, ai=5)
+    # Marked: 5 Tuincentrum, the card payment at the church.
+    # AI: 4 repayments, the one recent Verhuisd Bakkerij row, 6 Warenhuis, 10 Tweeluik.
+    assert p["proposed"] == dict(rules=2, rules_wrong=1, plain=26, plain_wrong=0, marked=6, ai=21)
 
 
 def test_the_projection_is_printed_per_month_with_the_ai_estimate():
     out = "\n".join(rc.format_rule_coverage(coverage(RECENT)))
-    need_today = 48 * rc.AI_FLAG_RATE / 12
-    need_proposed = (17 + 5 * rc.AI_FLAG_RATE) / 12
+    need_today = 53 * rc.AI_FLAG_RATE / 12
+    need_proposed = (6 + 21 * rc.AI_FLAG_RATE) / 12
     assert f"today: {need_today:.1f} rows need you" in out
     assert f"proposed: {need_proposed:.1f} rows need you" in out
 
@@ -488,7 +498,7 @@ def test_the_projection_is_printed_per_month_with_the_ai_estimate():
 def test_the_printed_splits_name_the_feature_but_not_the_amount_or_the_word():
     out = "\n".join(rc.format_rule_coverage(coverage(RECENT)))
     assert "split by recurring amount" in out and "split by code" in out
-    assert "drop" in out and "not seen in 12 months" in out
+    assert "drop" in out and "not seen in the window" in out
     for secret in (PERSONAL, "150.00", "Eigen", "eigen", "Sportschool", "Warenhuis", "Buurtwinkel"):
         assert secret not in out
 
@@ -501,3 +511,27 @@ def test_the_draft_file_holds_each_split_with_its_branches(tmp_path):
     assert own.startswith("split\t")
     assert "at 150.00 -> Persoonlijk vrij geld" in own and "not at 150.00 -> ai" in own
     assert next(line for line in lines if "\toude slager\t" in line).startswith("drop\t")
+
+
+def test_the_window_can_start_at_a_given_sheet_month():
+    """After the move: only months from the given one count."""
+    cov = coverage(RECENT, since="06/2025")
+    assert cov["window"] == [f"{m:02d}/2025" for m in range(6, 13)]
+    assert (cov["projection"]["months"], recent_since("06/2025")["buurtwinkel"]["why"]) == (7, "not seen")
+
+
+def recent_since(since):
+    return {d["key"]: d for d in coverage(RECENT, since=since)["draft"]}
+
+
+def test_a_changed_fixed_amount_still_counts_as_recurring():
+    """Free money went up once: both amounts recur, the repayments do not."""
+    data = ([(tx(f"01-{m:02d}-2025", "100.00" if m < 7 else "125.00", name="Eigen Rekening"),
+              "Persoonlijk vrij geld") for m in range(1, 13)] +
+            [(tx(f"15-{m:02d}-2025", a, name="Eigen Rekening"), c) for m, a, c in (
+                (2, "12.34", "Boodschappen"), (4, "23.45", "Boodschappen"),
+                (6, "34.56", "Huishouden"), (8, "45.67", "Cadeautjes"))])
+    (own,) = coverage(data)["draft"]
+    assert own["decision"] == "split" and own["split"]["feature"] == "recurring amount"
+    # Only the most repeated amount would catch 6 of the 12.
+    assert (own["hits"], own["correct"]) == (12, 12)
