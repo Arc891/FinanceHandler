@@ -26,7 +26,7 @@ def load_transactions_from_csv(csv_path: str) -> List[Dict[str, Any]]:
     We assume each row has at least 18 columns (0-17), as in your example:
       0: booking_date (e.g. '24-04-2025')
       1: account_iban (ignored)
-      2: counterparty_iban (ignored)
+      2: counterparty_iban (kept; the AI prompt never includes it)
       3: counterparty_name (e.g. 'DUO Hoofdrekening' or 'Picnic' or 'Jumbo …')
       4-6: (ignored)
       7: (ignored)
@@ -71,6 +71,7 @@ def load_transactions_from_csv(csv_path: str) -> List[Dict[str, Any]]:
 
         # 1) Extract fields by index
         booking_date = row[0].strip()
+        counterparty_iban = row[2].strip()
         counterparty_name = row[3].strip() if len(row) > 3 else ""
         currency = row[9].strip() if len(row) > 9 else ""
         amt_str = row[10].strip() if len(row) > 10 else "0"
@@ -111,6 +112,7 @@ def load_transactions_from_csv(csv_path: str) -> List[Dict[str, Any]]:
             },
             "debtor": {"name": debtor_name},
             "creditor": {"name": creditor_name},
+            "counterparty_iban": counterparty_iban,
             "remittance_information": rem_list,
             "bank_sequence_no": bank_sequence_no,
             "remittance_raw": raw_row[17].strip(),

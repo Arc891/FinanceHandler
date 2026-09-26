@@ -4,11 +4,12 @@ import csv
 
 
 def asn_row(date="24-04-2026", counterparty="Picnic", amount="-12.50",
-            seq="979142", remittance="Boodschappen"):
+            seq="979142", remittance="Boodschappen", counterparty_iban=""):
     """A synthetic 20-column ASN export row."""
     row = [""] * 20
     row[0] = date
     row[1] = "NL00TEST0000000001"
+    row[2] = counterparty_iban
     row[3] = counterparty
     row[7] = "EUR"
     row[9] = "EUR"

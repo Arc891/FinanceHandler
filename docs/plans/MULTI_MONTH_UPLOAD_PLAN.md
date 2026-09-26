@@ -2299,6 +2299,27 @@ measures them on months where the right answer is already known.
     (`test_cli_runs_with_no_tools`). Checked against CLI 2.1.283; the
     Pi container's CLI must support `--tools` too. A Sonnet rerun with
     it is due before Phase 4 step 5.
+- **Rule coverage** (added 2026-09-26, user): more regex rules, so the AI
+  only sees the rows that need judgement. The eval's errors concentrate in
+  a few categories, and rules are deterministic where the counterparty
+  decides the category.
+  - Done 2026-09-26 (me), 565 tests green: `eval_categoriser.py --rules`
+    runs the regex pass only and prints per-rule precision, the rows no
+    rule covers per true category, counterparty groups among those rows
+    (by a name key without branch numbers or places, and by IBAN) marked
+    pure (>= 90 % one category) or mixed, and how many uncovered rows have
+    a mirror (an opposite row of the same amount within 7 days, and
+    whether it names a spaarpot). It prints counts, category names, rule
+    patterns and anonymous group ids only; `--names-out` writes the
+    names and IBANs to a 0600 file for the user. `csv_helper` now keeps
+    `counterparty_iban` (the AI prompt never includes it), and
+    `categorization_rules.first_matching_rule` names the rule that fired.
+  - Next: the user runs it on the Pi and picks rules from the pure groups;
+    IBAN rules for own accounts (Spaarrekening, Persoonlijke rekening)
+    would live in config, not in `constants.py`. Mixed groups show where
+    a rule cannot decide (Cadeautjes bought at a grocery shop): those rows
+    stay with the AI or the user. The mirror counts show whether linking
+    Uit spaarpotje to its pot transfer can be deterministic.
 - Later, in its own session: a local model or Jev, scored with the same
   script (`/home/wsl/Coding/jev-investigation.md`).
 

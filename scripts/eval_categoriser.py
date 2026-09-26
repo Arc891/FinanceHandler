@@ -31,6 +31,10 @@ image's config and service account are used as they are):
     # when the dry run matches well (add --map OLD=NEW for renamed categories):
     docker exec finance-automation-bot python /tmp/eval/eval_categoriser.py \\
         --src /tmp/eval/src --model sonnet --runs 2 /tmp/eval/*.csv
+    # where more regex rules would help: regex only, no AI, a few minutes.
+    # The names file is for the user's eyes; the printed report is not.
+    docker exec finance-automation-bot python /tmp/eval/eval_categoriser.py \\
+        --src /tmp/eval/src --rules --names-out /tmp/eval/rule-names.tsv /tmp/eval/*.csv
     # afterwards, remove the exports from both places
     docker exec finance-automation-bot rm -rf /tmp/eval
     rm -rf /tmp/eval
@@ -50,6 +54,7 @@ import time
 import traceback
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
+from types import SimpleNamespace
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 for candidate in (os.path.join(PROJECT_ROOT, "src"), "/app/src"):
@@ -60,6 +65,11 @@ UNDECIDED = {"! Nog in te delen !", "CACHED"}
 NAME_MAX = 40            # longest category name the report prints
 SHOW_MIN = 2             # an unmapped name must occur this often to be shown
 THRESHOLDS = (0.9, 0.6, 0.0)
+GROUP_MIN = 3             # --rules: rows a counterparty group needs to be listed
+PURE_SHARE = 0.9          # --rules: a group this uniform is a rule candidate
+GROUPS_SHOWN = 30         # --rules: groups listed per grouping
+MIRROR_DAYS = 7           # --rules: an opposite row this close is a mirror
+PATTERN_MAX = 60          # --rules: longest rule pattern printed
 MIN_INTERVAL = 1.2        # seconds between Sheets calls: under 50 a minute
 RETRY_DELAYS = (20, 40, 80)
 SHEET_NAME = re.compile(r"^Maandelijks Budget (\d{2})/(\d{4})$")
@@ -443,6 +453,191 @@ def disagreement(preds_per_run):
     return n, differ
 
 
+# ── rule coverage (--rules): where more regex rules would help ─────────────
+
+KEY_TOKEN = re.compile(r"[a-z0-9]+")
+
+
+def _counterparty(tx):
+    return ((tx.get("creditor") or {}).get("name") or
+            (tx.get("debtor") or {}).get("name") or "").strip()
+
+
+def merchant_key(tx) -> str:
+    """A counterparty's name without branch numbers, places or case.
+
+    Words up to the first one holding a digit, at most two of them, so
+    `HEMA 5678 AMSTERDAM` and `hema` share a key. Without a name, the start
+    of the remittance text stands in.
+    """
+    text = _counterparty(tx) or " ".join(tx.get("remittance_information") or [])
+    words = []
+    for token in KEY_TOKEN.findall(text.lower()):
+        if any(ch.isdigit() for ch in token) or len(words) == 2:
+            break
+        if len(token) > 1:
+            words.append(token)
+    return " ".join(words)
+
+
+def spaarpot_names():
+    try:
+        from config.spaarpot_uuid_map import SPAARPOT_UUID_MAP
+    except ImportError:
+        return []
+    return list(SPAARPOT_UUID_MAP.values())
+
+
+def _day(tx):
+    from datetime import date
+    from finance_core.row_tuple import canonical_date
+    try:
+        return date.fromisoformat(canonical_date(tx.get("booking_date", "")))
+    except (TypeError, ValueError):
+        return None
+
+
+def _mirrors(txs, spaarpots):
+    """Per tx index: (days to the nearest mirror, mirror mentions a pot) or None."""
+    by_amount = defaultdict(list)
+    for i, tx in enumerate(txs):
+        try:
+            amount = round(abs(float(tx["transaction_amount"]["amount"])), 2)
+        except (KeyError, TypeError, ValueError):
+            continue
+        by_amount[amount].append(i)
+    found = {}
+    for idxs in by_amount.values():
+        for i in idxs:
+            best = None
+            for j in idxs:
+                a, b = txs[i], txs[j]
+                if j == i or a.get("credit_debit_indicator") == b.get("credit_debit_indicator"):
+                    continue
+                da, db = _day(a), _day(b)
+                if da is None or db is None or abs((da - db).days) > MIRROR_DAYS:
+                    continue
+                text = " ".join(b.get("remittance_information") or []).lower()
+                pot = any(name.lower() in text for name in spaarpots if name)
+                gap = abs((da - db).days)
+                if best is None or (gap, not pot) < (best[0], not best[1]):
+                    best = (gap, pot)
+            found[i] = best
+    return found
+
+
+def _groups(members, key_of, prefix):
+    by_key = defaultdict(list)
+    for rec, truth in members:
+        key = key_of(rec.tx)
+        if key:
+            by_key[key].append((rec, truth))
+    groups = []
+    for key, rows in by_key.items():
+        if len(rows) < GROUP_MIN:
+            continue
+        truths = Counter(t for _, t in rows)
+        groups.append(dict(key=key, rows=len(rows), months=len({r.label for r, _ in rows}),
+                           truths=truths,
+                           pure=truths.most_common(1)[0][1] / len(rows) >= PURE_SHARE,
+                           names=Counter(_counterparty(r.tx) or "(no name)" for r, _ in rows)))
+    groups.sort(key=lambda g: (-g["rows"], g["key"]))
+    for n, g in enumerate(groups, 1):
+        g["id"] = f"{prefix}{n:02d}"
+    return groups
+
+
+def rule_coverage(records, truths, txs, spaarpot_names=()):
+    """The regex pass alone, scored, plus what the uncovered rows have in common."""
+    from finance_core.categorization_rules import first_matching_rule
+    fired = [first_matching_rule(r.tx) for r in records]
+    results = [SimpleNamespace(category=rule.category.value, method="regex", confidence=1.0)
+               if rule else None for rule in fired]
+    rows = score(records, truths, results)
+
+    rules = {}
+    uncovered = []
+    for rec, rule, row in zip(records, fired, rows):
+        if rule is None:
+            uncovered.append((rec, row["truth"]))
+            continue
+        hit = rules.setdefault(rule.pattern, dict(hits=0, correct=0, wrong=Counter()))
+        hit["hits"] += 1
+        if row["correct"]:
+            hit["correct"] += 1
+        else:
+            hit["wrong"][row["truth"]] += 1
+
+    position = {id(tx): i for i, tx in enumerate(txs)}
+    near = _mirrors(txs, list(spaarpot_names))
+    mirrors = {}
+    for rec, truth in uncovered:
+        m = mirrors.setdefault(truth, dict(rows=0, mirrored=0, same_day=0, spaarpot=0))
+        m["rows"] += 1
+        hit = near.get(position.get(id(rec.tx)))
+        if hit:
+            m["mirrored"] += 1
+            m["same_day"] += hit[0] == 0
+            m["spaarpot"] += hit[1]
+
+    return dict(
+        scored=len(records),
+        rules=rules,
+        uncovered=Counter(t for _, t in uncovered),
+        name_groups=_groups(uncovered, merchant_key, "N"),
+        iban_groups=_groups(uncovered, lambda tx: (tx.get("counterparty_iban") or "").strip(), "I"),
+        mirrors=mirrors,
+    )
+
+
+def _share(counter, n):
+    return ", ".join(f"{_name(c)} {100 * k / n:.0f}%" for c, k in counter.most_common(3))
+
+
+def format_rule_coverage(cov):
+    lines = [f"rule coverage (regex only, nothing sent to the AI), {cov['scored']} rows scored:"]
+    covered = sum(h["hits"] for h in cov["rules"].values())
+    right = sum(h["correct"] for h in cov["rules"].values())
+    lines.append(f"  covered by a rule: {_pct(covered, right)} correct; "
+                 f"not covered: {sum(cov['uncovered'].values())}")
+    lines.append("rules that fired (pattern: hits, correct; true category when wrong):")
+    for pattern, h in sorted(cov["rules"].items(), key=lambda kv: (kv[1]["correct"] - kv[1]["hits"], kv[0])):
+        shown = pattern if len(pattern) <= PATTERN_MAX else pattern[:PATTERN_MAX] + "..."
+        wrong = f"; wrong: {_share(h['wrong'], h['hits'] - h['correct'])}" if h["wrong"] else ""
+        lines.append(f"  {shown!r}: {_pct(h['hits'], h['correct'])}{wrong}")
+    lines.append("not covered by any rule, per true category:")
+    for cat, n in cov["uncovered"].most_common():
+        lines.append(f"  {_name(cat)}: {n}")
+    for title, groups in (("counterparty name", cov["name_groups"]),
+                          ("counterparty IBAN", cov["iban_groups"])):
+        pure = [g for g in groups if g["pure"]]
+        lines.append(f"uncovered rows grouped by {title} (groups of {GROUP_MIN}+ rows): "
+                     f"{len(groups)} groups, {sum(g['rows'] for g in groups)} rows; "
+                     f"pure (>= {100 * PURE_SHARE:.0f}% one category): {len(pure)} groups, "
+                     f"{sum(g['rows'] for g in pure)} rows")
+        for g in groups[:GROUPS_SHOWN]:
+            kind = "pure " if g["pure"] else "mixed"
+            lines.append(f"  {g['id']} {kind} {g['rows']} rows over {g['months']} months: "
+                         f"{_share(g['truths'], g['rows'])}")
+    lines.append(f"uncovered rows with a mirror (opposite row, same amount, within {MIRROR_DAYS} days):")
+    for cat, m in sorted(cov["mirrors"].items(), key=lambda kv: -kv[1]["rows"]):
+        lines.append(f"  {_name(cat)}: {m['mirrored']}/{m['rows']} mirrored, "
+                     f"{m['same_day']} same day, {m['spaarpot']} with a spaarpot name")
+    return lines
+
+
+def write_names(cov, path):
+    """The groups' keys, names and IBANs, for the user's eyes only (0600)."""
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    os.fchmod(fd, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as out:
+        out.write("id\tkey\trows\tcategories\tnames\n")
+        for g in cov["name_groups"] + cov["iban_groups"]:
+            cats = ", ".join(f"{c} {k}" for c, k in g["truths"].most_common())
+            names = " | ".join(f"{n} ({k})" for n, k in g["names"].most_common(5))
+            out.write(f"{g['id']}\t{g['key']}\t{g['rows']}\t{cats}\t{names}\n")
+
+
 # ── the report ──────────────────────────────────────────────────────────────
 
 def _name(s):
@@ -570,6 +765,15 @@ def run(args, counter):
     say("")
     for line in format_matching(m):
         say(line)
+    if args.rules:
+        cov = rule_coverage(m.records, m.truths, txs, spaarpot_names())
+        say("")
+        for line in format_rule_coverage(cov):
+            say(line)
+        if args.names_out:
+            write_names(cov, args.names_out)
+            say(f"names written to {args.names_out} (not shown)")
+        return 0
     if args.dry_run or not m.records:
         say("")
         say("dry run: nothing sent to the AI" if args.dry_run else "no rows to score")
@@ -615,6 +819,10 @@ def main(argv=None) -> int:
     parser.add_argument("--src", help="a source tree to import instead of the image's")
     parser.add_argument("--dry-run", action="store_true",
                         help="read and match only; send nothing to the AI")
+    parser.add_argument("--rules", action="store_true",
+                        help="regex only: rule precision and where new rules would help")
+    parser.add_argument("--names-out", metavar="PATH",
+                        help="with --rules: write group names and IBANs here (0600), never printed")
     parser.add_argument("--debug", action="store_true",
                         help="show tracebacks; may print row content")
     args = parser.parse_args(argv)

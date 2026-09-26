@@ -70,6 +70,14 @@ def test_existing_fields_unchanged(tmp_path):
     assert tx["bank_transaction_code"] == {"description": "8810 IDB"}
 
 
+
+def test_counterparty_iban_is_carried(tmp_path):
+    """Own accounts are told apart by IBAN, not by name (rule coverage)."""
+    path = write_csv(tmp_path / "export.csv", [
+        asn_row(counterparty_iban=" NL00TEST0000000009 "), asn_row(seq="2")])
+    txs = load_transactions_from_csv(path)
+    assert [t["counterparty_iban"] for t in txs] == ["NL00TEST0000000009", ""]
+
 # ── the upload is never rewritten; the bank's own remittance is kept (plan 4.6) ──
 
 def test_load_leaves_the_original_bytes_intact(tmp_path):

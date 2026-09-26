@@ -13,7 +13,7 @@ import sys
 
 from constants import ExpenseCategory, IncomeCategory
 from finance_core.categorization_engine import CategorizationEngine
-from finance_core.categorization_rules import apply_categorization_rules
+from finance_core.categorization_rules import apply_categorization_rules, first_matching_rule
 
 MARKERS = [r"\bDUO\b", r"Anamata"]
 
@@ -116,3 +116,21 @@ def test_engine_regex_pass_does_not_import_the_ui_module(monkeypatch):
     engine = CategorizationEngine(ai_enabled=False)
     assert engine._apply_regex_rules(expense("PICNIC")) == (
         ExpenseCategory.BOODSCHAPPEN.value, "Picnic inkopen")
+
+
+# ── which rule fired (rule coverage report) ─────────────────────────────────
+
+def test_first_matching_rule_names_the_pattern_that_fired():
+    rule = first_matching_rule(expense("JUMBO UTRECHT"))
+    assert "JUMBO" in rule.pattern
+    assert rule.category is ExpenseCategory.BOODSCHAPPEN
+    assert apply_categorization_rules(expense("JUMBO UTRECHT"))[0] == "Boodschappen"
+
+
+def test_first_matching_rule_uses_the_income_table_for_income():
+    rule = first_matching_rule(income("DUO Hoofdrekening"))
+    assert rule.pattern == "DUO" and rule.category is IncomeCategory.OVERHEID
+
+
+def test_first_matching_rule_is_none_without_a_match():
+    assert first_matching_rule(expense("Nobody", "nothing here")) is None
