@@ -2278,6 +2278,25 @@ measures them on months where the right answer is already known.
 1. `retry_failed_transactions.py` on the new layer; delete
    `recategorize_pending.py`; `sheet_shape.py --folder`; `seed_state.py`.
    Exit check: the same grep over `scripts` is empty.
+
+- Done 2026-09-26 (me), step 1 part 1, 527 tests green:
+  - `retry_failed_transactions.py` works from `failed_uploads.json` as
+    `commit_append` writes it. An entry whose run is still open is
+    skipped and kept, closing the gap recorded under Phase 3 step 3:
+    `/resume` owes those rows. Otherwise the sheet for `period_label` is
+    opened through the index (never created); rows the block already
+    holds are skipped as a multiset, because a failed write may have
+    landed; the rest go in one `commit_append`, audited in the ledger
+    under the entry's `upload_id` so `undo_upload.py` reverses them with
+    their run. A failed append keeps the entry with an `attempts` count;
+    the file is rewritten after every entry. Old-format entries are
+    reported and left alone. Counts only are printed; `--dry-run` reads
+    but writes nothing. It does not sort, and names the months for
+    `/sort`.
+  - `recategorize_pending.py` is deleted. The exit grep over `scripts`
+    is empty.
+  - Tests: `tests/test_retry_failed.py`; a mutation pass (7) is caught in
+    full.
 2. Docs: `AGENTS.md`, `docs/DEVELOPMENT.md`, `docs/CHANGES.md`,
    `config_settings.example.py`; `run.sh` (token check, `src/config` bind
    mount, remove the service-account check, note on `--force-rebuild`);

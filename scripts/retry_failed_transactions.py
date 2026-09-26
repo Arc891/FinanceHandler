@@ -1,196 +1,178 @@
 #!/usr/bin/env python3
 """
-Script to retry failed transactions that couldn't be uploaded due to sheet size limits.
-Uses bulk upload (single API call per type) instead of the background queue.
+Re-append the rows of failed sheet writes (plan 4.10, Phase 4 step 1).
 
-IMPORTANT: Stop the bot container before running this script to avoid concurrent writes.
+    venv/bin/python scripts/retry_failed_transactions.py             # retry every entry
+    venv/bin/python scripts/retry_failed_transactions.py --dry-run   # print what would happen
+
+A failed write (sheet_writer.commit_append) leaves an entry in
+data/failed_uploads.json with the rows, their upload_id, period_label and
+block. Per entry this script:
+
+- skips it, and keeps it, while its run is still open: that run holds the
+  same rows and /resume reconciles and writes them, so writing them here as
+  well would write them twice;
+- opens the sheet for period_label through the index (never creates one);
+- skips every row the block already holds, as a multiset: the failed write
+  may have landed after all;
+- appends the rest in one write, audits them in the ledger under the entry's
+  upload_id (so undo_upload.py reverses them with the rest of that run), and
+  drops the entry. A failing append keeps the entry and counts the attempt.
+
+Entries in the old pipeline's format (no period_label or block) are reported
+and left alone. It prints counts only, never row content. Run it while no
+upload is in progress: the bot appends to the same file during a run. The
+closing sort is not done here; run /sort for the months it names.
 """
 
-import sys
+import argparse
+import json
 import os
-import logging
+import sys
+import tempfile
+from collections import Counter
+from datetime import datetime, timezone
 
-# Add the src directory to Python path so we can import modules
-# Go up one level from scripts/ to project root, then into src/
-project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, os.path.join(project_root, 'src'))
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(PROJECT_ROOT, "src"))
 
-from finance_core.background_upload import (
-    get_failed_uploads,
-    clear_failed_uploads,
-    get_upload_queue
-)
-from finance_core.google_sheets import GoogleSheetsExporter
-from finance_core.session_management import load_session, save_session
-from config.config_settings import GOOGLE_CREDENTIALS_PATH
-
-# Set up logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
+from finance_core.config_access import project_path, setting  # noqa: E402
+from finance_core.ledger import Ledger  # noqa: E402
+from finance_core.row_tuple import BLOCKS_BY_NAME, canonical  # noqa: E402
+from finance_core.run_state import RunStore  # noqa: E402
+from finance_core.sheet_writer import (DEFAULT_FAILED_PATH, commit_append,  # noqa: E402
+                                       intended_cells, read_block)
 
 
-def collect_transactions(user_id):
-    """Collect and deduplicate all failed transactions from recovery file + session"""
-    expenses = []
-    incomes = []
-    seen = set()
+def load_entries(path) -> list:
+    if not os.path.exists(path):
+        return []
+    with open(path, encoding="utf-8") as fh:
+        data = json.load(fh) or {}
+    return list(data.get("failed", []))
 
-    def dedup_key(tx):
-        """Create a dedup key from transaction content"""
-        date = tx.get('booking_date', '')
-        amount = tx.get('transaction_amount', {}).get('amount', '')
-        desc = tx.get('description', '')
-        category = tx.get('category', '')
-        return f"{date}|{amount}|{desc}|{category}"
 
-    # From recovery file
-    for item in get_failed_uploads(user_id):
-        tx = item.get('transaction', {})
-        if not tx.get('category'):
-            continue
-        key = dedup_key(tx)
-        if key in seen:
-            continue
-        seen.add(key)
-        if item.get('transaction_type') == 'income':
-            incomes.append(tx)
+def save_entries(path, entries) -> None:
+    directory = os.path.dirname(os.path.abspath(path))
+    os.makedirs(directory, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=directory, prefix=".failed.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            json.dump({"failed": entries}, fh, indent=2, ensure_ascii=False)
+        os.replace(tmp, path)
+    except BaseException:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+        raise
+
+
+def is_current(entry) -> bool:
+    """Written by sheet_writer.commit_append, not by the old upload queue."""
+    return (isinstance(entry, dict) and entry.get("period_label")
+            and entry.get("block") in BLOCKS_BY_NAME
+            and isinstance(entry.get("transactions"), list))
+
+
+def owed_rows(spreadsheet, block, txs) -> list:
+    """The rows of ``txs`` the block does not already hold, as a multiset."""
+    present = Counter(t for t in read_block(spreadsheet, block).tuples if t)
+    owed = []
+    for tx in txs:
+        cells = canonical(intended_cells(tx))
+        if present[cells] > 0:
+            present[cells] -= 1
         else:
-            expenses.append(tx)
-
-    # From session (legacy)
-    remaining, session_income, session_expenses = load_session(user_id)
-    for tx in session_expenses:
-        if not tx.get('category'):
-            continue
-        key = dedup_key(tx)
-        if key not in seen:
-            seen.add(key)
-            expenses.append(tx)
-    for tx in session_income:
-        if not tx.get('category'):
-            continue
-        key = dedup_key(tx)
-        if key not in seen:
-            seen.add(key)
-            incomes.append(tx)
-
-    return expenses, incomes, remaining
+            owed.append(tx)
+    return owed
 
 
-def main():
-    if len(sys.argv) != 2:
-        print("Usage: python retry_failed_transactions.py <user_id>")
-        print("Example: python retry_failed_transactions.py 1395443068227948630")
-        sys.exit(1)
+def default_registry():
+    from finance_core.sheet_registry import GoogleWorkbooks, RegistryConfig, SheetRegistry
+    return SheetRegistry(GoogleWorkbooks.from_credentials(), RegistryConfig.from_settings())
 
-    try:
-        user_id = int(sys.argv[1])
-    except ValueError:
-        print("Error: user_id must be a valid integer")
-        sys.exit(1)
 
-    logger.warning("⚠️  IMPORTANT: Make sure the bot container is stopped before running!")
-    logger.warning("⚠️  Concurrent writes to the same sheet can cause data corruption.")
-    logger.info(f"🔄 Starting retry process for user {user_id}")
+def main(argv=None, *, registry=None, stdout_write=sys.stdout.write) -> int:
+    parser = argparse.ArgumentParser(description="Re-append the rows of failed sheet writes.")
+    parser.add_argument("--dry-run", action="store_true", help="print what would be done, change nothing")
+    parser.add_argument("--failed",
+                        default=project_path(setting("FAILED_UPLOADS_PATH", DEFAULT_FAILED_PATH)))
+    parser.add_argument("--runs-dir", default=project_path(setting("RUNS_DIR", "data/runs")))
+    parser.add_argument("--ledger", default=project_path(setting("UPLOAD_LEDGER_PATH", "data/upload_ledger.json")))
+    args = parser.parse_args(argv)
 
-    try:
-        expenses, incomes, remaining = collect_transactions(user_id)
-        total = len(expenses) + len(incomes)
+    def say(line=""):
+        stdout_write(line + "\n")
 
-        if total == 0:
-            logger.info("ℹ️ No failed transactions found. Nothing to retry.")
-            return
+    entries = load_entries(args.failed)
+    if not entries:
+        say(f"Nothing to retry: {args.failed} holds no failed writes.")
+        return 0
 
-        logger.info(f"📊 Found {total} unique failed transactions: "
-                     f"{len(expenses)} expenses, {len(incomes)} income")
+    open_ids = {r["upload_id"] for r in RunStore(args.runs_dir).open_runs()}
+    ledger = Ledger(args.ledger)
+    keep, problems, touched = [], 0, []
+    with tempfile.TemporaryDirectory() as scratch:
+        # commit_append records its own failure; this script keeps the entry instead.
+        scratch_failed = os.path.join(scratch, "failed.json")
+        for i, entry in enumerate(entries, start=1):
+            if not is_current(entry):
+                say(f"entry {i}: old format (no period_label or block); left in the file")
+                keep.append(entry)
+                continue
+            label, block_name, txs = entry["period_label"], entry["block"], entry["transactions"]
+            upload_id = entry.get("upload_id")
+            where = f"entry {i} ({label} {block_name}, {len(txs)} row(s), upload {upload_id})"
+            if upload_id in open_ids:
+                say(f"{where}: skipped, its open run holds these rows; /resume {upload_id} writes them")
+                keep.append(entry)
+                continue
 
-        # Show examples
-        for label, txs in [("expense", expenses), ("income", incomes)]:
-            if txs:
-                logger.info(f"📝 Example {label} transactions:")
-                for i, tx in enumerate(txs[:3]):
-                    desc = tx.get('description', 'Unknown')
-                    amount = tx.get('transaction_amount', {}).get('amount', '?')
-                    category = tx.get('category', 'No category')
-                    logger.info(f"  {i+1}. {desc} - €{amount} - {category}")
-                if len(txs) > 3:
-                    logger.info(f"  ... and {len(txs) - 3} more")
+            try:
+                registry = registry or default_registry()
+                spreadsheet = registry.lookup(label)
+            except Exception as exc:
+                say(f"{where}: cannot open the sheet ({type(exc).__name__}); kept")
+                keep.append(entry)
+                problems += 1
+                continue
+            if spreadsheet is None:
+                say(f"{where}: {label} is not in the index; add it with /months register, then retry")
+                keep.append(entry)
+                problems += 1
+                continue
 
-        # Set up exporter and detect positions
-        logger.info("🔍 Connecting to Google Sheets and detecting positions...")
-        exporter = GoogleSheetsExporter(GOOGLE_CREDENTIALS_PATH)
-        sheet = exporter._get_worksheet()
+            block = BLOCKS_BY_NAME[block_name]
+            owed = owed_rows(spreadsheet, block, txs)
+            already = len(txs) - len(owed)
+            if args.dry_run:
+                say(f"{where}: would append {len(owed)}, already in the sheet {already}")
+                keep.append(entry)
+                continue
+            if owed:
+                try:
+                    pairs = commit_append(spreadsheet, block, owed,
+                                          context={"upload_id": upload_id, "period_label": label},
+                                          failed_path=scratch_failed)
+                except Exception as exc:
+                    entry = dict(entry, error=f"{type(exc).__name__}: {exc}",
+                                 attempts=entry.get("attempts", 0) + 1,
+                                 failed_at=datetime.now(timezone.utc).isoformat(timespec="seconds"))
+                    say(f"{where}: append failed ({type(exc).__name__}); kept for the next retry")
+                    keep.append(entry)
+                    problems += 1
+                    save_entries(args.failed, keep + entries[i:])
+                    continue
+                ledger.record_audit(upload_id or "retry", spreadsheet.id, block_name, pairs)
+                if label not in touched:
+                    touched.append(label)
+            say(f"{where}: appended {len(owed)}, already in the sheet {already}")
+            # After every entry, so a crash never loses one; a rerun skips rows already written.
+            save_entries(args.failed, keep + entries[i:])
 
-        # Detect current last rows
-        queue = get_upload_queue()
-        queue.exporter = exporter
-        queue._detect_current_positions(user_id)
-        expense_start = queue.current_expense_row
-        income_start = queue.current_income_row
-        logger.info(f"📍 Will write expenses starting at row {expense_start}, "
-                     f"income starting at row {income_start}")
-
-        # Ensure sheet has enough rows
-        max_needed = max(
-            expense_start + len(expenses) - 1,
-            income_start + len(incomes) - 1
-        )
-        if max_needed > sheet.row_count:
-            new_size = max_needed + 50
-            logger.info(f"📏 Expanding sheet from {sheet.row_count} to {new_size} rows...")
-            sheet.resize(rows=new_size)
-
-        # Bulk upload expenses
-        if expenses:
-            rows = [exporter.format_transaction_for_sheet(tx) for tx in expenses]
-            end_row = expense_start + len(rows) - 1
-            target_range = f"B{expense_start}:E{end_row}"
-            logger.info(f"📤 Uploading {len(rows)} expenses to {target_range}...")
-            sheet.update(rows, target_range)
-            logger.info(f"✅ Uploaded {len(rows)} expenses")
-
-        # Bulk upload incomes
-        if incomes:
-            rows = [exporter.format_transaction_for_sheet(tx) for tx in incomes]
-            end_row = income_start + len(rows) - 1
-            target_range = f"G{income_start}:J{end_row}"
-            logger.info(f"📤 Uploading {len(rows)} income transactions to {target_range}...")
-            sheet.update(rows, target_range)
-            logger.info(f"✅ Uploaded {len(rows)} income transactions")
-
-        # Save new positions
-        from finance_core.session_management import save_sheet_positions
-        new_expense_row = expense_start + len(expenses)
-        new_income_row = income_start + len(incomes)
-        try:
-            from config.config_settings import GSHEET_NAME
-        except ImportError:
-            GSHEET_NAME = None
-        save_sheet_positions(user_id, new_expense_row, new_income_row,
-                             sheet_name=GSHEET_NAME)
-        logger.info(f"💾 Saved new positions: expenses={new_expense_row}, "
-                     f"income={new_income_row}")
-
-        # Clear recovery file and session failed transactions
-        cleared = clear_failed_uploads(user_id)
-        save_session(user_id, remaining, [], [])
-        logger.info(f"🧹 Cleared {cleared} entries from recovery file and "
-                     f"session failed transactions")
-
-        # Sort the sheet
-        logger.info("📊 Sorting sheet by date...")
-        expense_sorted, income_sorted = exporter.sort_transactions_by_date()
-        logger.info(f"✅ Sorted {expense_sorted} expenses, {income_sorted} income")
-
-        logger.info("✅ Retry process completed successfully!")
-
-    except Exception as e:
-        logger.error(f"❌ Error during retry process: {e}", exc_info=True)
-        sys.exit(1)
+    if touched:
+        say("Sort the months written to: " + ", ".join(f"/sort {label}" for label in touched))
+    return 1 if problems else 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
