@@ -2297,6 +2297,25 @@ measures them on months where the right answer is already known.
     is empty.
   - Tests: `tests/test_retry_failed.py`; a mutation pass (7) is caught in
     full.
+- Done 2026-09-26 (me), step 1 part 2, `seed_state.py`, 549 tests green:
+  - Reads every indexed sheet through the registry (both blocks,
+    unformatted). A sheet's boundary is its earliest ISO row date across
+    both blocks; the newest becomes the anchor and the rest its history.
+    Empty sheets are skipped. Each populated sheet seeds the weak ledger
+    under its label (`Ledger.seed_label`, date | absolute amount | block).
+  - Prints the current anchor, the new anchor and history (dates and
+    labels only) and writes nothing until the user types exactly `yes`.
+    A boundary whose label disagrees with `label_for_boundary` is marked
+    `!` for review; two sheets with the same or crossing boundaries are
+    refused. It refuses while any run is open.
+  - `--set-anchor DD-MM-YYYY MM/YYYY` keeps the history older than the
+    new boundary, pushes the old anchor onto it when older, and touches
+    neither the sheets nor the ledger.
+  - Tests: `tests/test_seed_state.py`, covering the section 5 spec, rule 4
+    placement from the seeded history, and a mutation pass (9) caught in
+    full.
+  - Left in step 1: `sheet_shape.py --folder` and `--summary`, and moving
+    it off the retired `GOOGLE_CREDENTIALS_PATH` and `GSHEET_TAB` keys.
 2. Docs: `AGENTS.md`, `docs/DEVELOPMENT.md`, `docs/CHANGES.md`,
    `config_settings.example.py`; `run.sh` (token check, `src/config` bind
    mount, remove the service-account check, note on `--force-rebuild`);
