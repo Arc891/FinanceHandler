@@ -888,6 +888,7 @@ def write_draft(cov, path):
           "#      review  this category, but always marked for you to check (multi-purpose shops)\n"
           "#      gd      Goeie doelen, catching too much rather than too little; rows that are\n"
           "#              less clearly a donation (e.g. a card payment) are marked\n"
+          "#      cut=A   this category for amounts from A up (e.g. cut=125); smaller amounts go to the AI\n"
           "#      drop    no rule; the AI decides\n"
           "#    You may also change the category or a branch. `written` is over every recent row no\n"
           "#    rule covers today, so it shows what else the pattern would catch. Proposals rest on the\n"

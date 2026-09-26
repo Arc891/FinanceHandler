@@ -9,6 +9,8 @@ first word of each decision line changed where the user decided otherwise:
     keep    one plain rule
     review  one rule whose rows are marked for the user to check
     gd      Goeie doelen: card payments (BEA) marked, the rest plain
+    cut=A   the category for amounts from A up, plain; smaller amounts go
+            to the AI (an `ai` line)
     split   one rule per branch of the fitted split, then an `ai` line so a
             value the split never saw goes to the AI
     drop    no rule
@@ -26,7 +28,8 @@ import sys
 from collections import Counter
 from types import SimpleNamespace
 
-DECISIONS = ("keep", "review", "gd", "split", "drop")
+DECISIONS = ("keep", "review", "gd", "split", "cut", "drop")
+CUT = re.compile(r"^cut=(.*)$")
 GOEIE_DOELEN = "Goeie doelen"
 HEADER = ("# Local rules, from the rule draft by scripts/apply_rule_draft.py. PRIVATE: holds\n"
           "# names and amounts. Columns (tab-separated): direction, pattern, when, category,\n"
@@ -84,8 +87,25 @@ def _split_lines(direction, pattern, branches, description, source):
     return lines
 
 
+def _cut_amount(text):
+    try:
+        value = float(text)
+    except ValueError:
+        value = 0
+    if not value > 0:
+        raise ValueError("cut needs a positive amount, e.g. cut=125")
+    return f"{value:g}"
+
+
+def _decision(word):
+    return "cut" if CUT.match(word) else word
+
+
 def _lines(fields):
     decision, gid, direction, category, key, pattern, branches = fields[:7]
+    amount = None
+    if m := CUT.match(decision):
+        decision, amount = "cut", _cut_amount(m[1])
     source = f"{gid} {direction}"
     description = key.title()
     if decision == "drop":
@@ -101,6 +121,9 @@ def _lines(fields):
                 ("out", pattern, "-", GOEIE_DOELEN, "-", description, source)]
     if category in ("", "-"):
         raise ValueError(f"{decision} needs a category (a split line has none; fill in the category column)")
+    if decision == "cut":
+        return [(direction, pattern, f"amount>={amount}", category, "-", description, source),
+                (direction, pattern, "-", "ai", "-", "-", source)]
     return [(direction, pattern, "-", category, "?" if decision == "review" else "-", description, source)]
 
 
@@ -116,7 +139,7 @@ def convert(text):
         if len(fields) < 7:
             errors.append(f"{where}: too few columns")
             continue
-        if fields[0] not in DECISIONS:
+        if _decision(fields[0]) not in DECISIONS:
             errors.append(f"{where}: unknown decision {fields[0]!r}")
             continue
         try:
@@ -124,7 +147,7 @@ def convert(text):
         except ValueError as exc:
             errors.append(f"{where}: {exc}")
             continue
-        counts[fields[0]] += 1
+        counts[_decision(fields[0])] += 1
         out += rules
     body = "".join("\t".join(rule) + "\n" for rule in out)
     return SimpleNamespace(text=HEADER + body, counts=counts, rules=len(out), errors=errors)

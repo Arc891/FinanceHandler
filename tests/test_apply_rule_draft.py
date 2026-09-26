@@ -102,3 +102,35 @@ def test_nothing_is_written_when_a_line_is_refused(tmp_path):
     target = tmp_path / "local_rules.tsv"
     assert ard.main([str(draft), str(target)]) == 1
     assert not target.exists()
+
+
+def test_a_cut_writes_the_category_from_the_amount_up_and_leaves_the_rest_to_the_ai(tmp_path):
+    """N07: free money is the large transfers; smaller ones go to the AI."""
+    text = draft_text(tmp_path, lambda t: first_word(t, "warenhuis", "cut=125"))
+    out = ard.convert(text)
+    assert out.errors == [] and out.counts["cut"] == 1
+    local = parse_local_rules(out.text)
+    shop = [r for r in local if r.description == "Warenhuis"]
+    assert [(r.category.value, r.marked) for r in shop] == [("Cadeautjes", False)]
+    big = tx_for("warenhuis", "125.00")
+    small = tx_for("warenhuis", "124.99")
+    assert cr.rule_result(big, local)[0] == "Cadeautjes"
+    assert cr.rule_result(small, local) is None       # the `ai` line: the AI decides
+
+
+def test_a_cut_on_a_split_line_without_a_category_is_refused(tmp_path):
+    out = ard.convert(draft_text(tmp_path, lambda t: first_word(t, "eigen rekening", "cut=125")))
+    assert len(out.errors) == 1 and "category" in out.errors[0] and "eigen" not in out.errors[0]
+
+
+def test_a_cut_needs_a_positive_amount(tmp_path):
+    for word in ("cut=", "cut=abc", "cut=-5", "cut=0"):
+        out = ard.convert(draft_text(tmp_path, lambda t: first_word(t, "warenhuis", word)))
+        assert len(out.errors) == 1 and "amount" in out.errors[0]
+
+
+def tx_for(key, amount):
+    """A new row for the group `key`, at `amount`."""
+    from test_rule_analysis import tx
+    name = next(t for t, _ in RECENT if rc.merchant_key(t) == key)["debtor"]["name"]
+    return tx("20-12-2025", amount, name=name, rem="x")
