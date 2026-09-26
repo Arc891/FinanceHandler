@@ -134,6 +134,20 @@ async def test_large_output_is_read_in_full(fake_claude):
     assert text == big
 
 
+
+async def test_cli_runs_with_no_tools(fake_claude, tmp_path):
+    """With --max-turns 1, a model that reaches for a tool ends as
+    error_max_turns (exit 1): 28 Sonnet batch calls failed so in the eval."""
+    install, _ = fake_claude
+    argfile = tmp_path / "args"
+    install(f'for a in "$@"; do printf "[%s]\\n" "$a"; done > "{argfile}"\n'
+            f"echo '{RESULT}'\n")
+    await asyncio.wait_for(provider(timeout=10).complete("prompt"), timeout=15)
+    args = argfile.read_text().splitlines()
+    i = args.index("[--tools]")
+    assert args[i + 1] == "[]"
+
+
 # ── A failed call says why ──────────────────────────────────────────────────
 
 def fails_with(stdout="", stderr="", code=1):

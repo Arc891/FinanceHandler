@@ -202,7 +202,10 @@ class ClaudeProvider:
                 "claude", "-p", prompt,
                 "--model", self.model,
                 "--output-format", "json",
-                "--max-turns", "1"  # Single response, no back-and-forth
+                "--max-turns", "1",  # Single response, no back-and-forth
+                # No tools: with one turn, a tool call ends the run as
+                # error_max_turns (exit 1) instead of giving an answer.
+                "--tools", ""
             ]
 
             logger.debug(f"Calling Claude Code CLI with model: {self.model}")

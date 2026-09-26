@@ -2270,6 +2270,35 @@ measures them on months where the right answer is already known.
     - Next: rerun the eval (Sonnet once, Haiku twice) with this code,
       read the log kinds, then decide `AI_MAX_PARALLEL_CHUNKS` and the
       model.
+- Results, rerun 2026-09-26 (Pi, `AI_MAX_PARALLEL_CHUNKS` 3, same 1,918
+  rows):
+  - **Sonnet, one run**, 50.9 min: overall 65.6 %; AI 407 / 870 answered
+    = 46.8 %; no answer 120 / 990 (was 330). High band 66.4 % correct. At
+    the 0.75 threshold: 529 flagged, 155 written wrong and unflagged.
+  - **Haiku, two runs**, 58.3 and 45.3 min: overall 67.4 % / 67.9 %; AI
+    46.0 % / 47.2 % answered; no answer 30 / 32. High band 56 % correct.
+    At 0.75: 342 / 325 flagged, 283 / 293 wrong and unflagged. The runs
+    disagree on 12.5 % of rows.
+  - Log kinds: 28 of Sonnet's 30 `claude_provider` errors were
+    `subtype=error_max_turns`, confirming the suspect above (high
+    confidence). Haiku had none; its errors were 7 timeouts and 7 other
+    over two runs. The chunk retry recovered about 7 of 11 failed chunks.
+  - Both models miss the same categories: Uit spaarpotje 0 / 91,
+    Cadeautjes 13-17 %, Spaarrekening mostly read as Persoonlijke
+    rekening (77 / 52 rows). These are gaps in rules and context, not in
+    the model (moderate confidence); see "Rule coverage" below.
+  - **Decided (user, 2026-09-26): Sonnet**, because Haiku writes about
+    twice as many rows wrong and unflagged at the same threshold, the
+    errors nothing points at. **`AI_MAX_PARALLEL_CHUNKS` stays 3**
+    (moderate confidence): no error kind points at concurrency, and 1
+    about doubles wall time. Production already defaults to `sonnet`
+    (`ClaudeCategorizer`); `CLAUDE_MODEL` is read nowhere, so Phase 4
+    step 2 retires it from the example config.
+  - Done 2026-09-26 (me), 550 tests green: `_complete_cli` passes
+    `--tools ""`, so a one-turn call can no longer end in a tool call
+    (`test_cli_runs_with_no_tools`). Checked against CLI 2.1.283; the
+    Pi container's CLI must support `--tools` too. A Sonnet rerun with
+    it is due before Phase 4 step 5.
 - Later, in its own session: a local model or Jev, scored with the same
   script (`/home/wsl/Coding/jev-investigation.md`).
 
