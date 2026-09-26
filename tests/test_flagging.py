@@ -229,3 +229,20 @@ def test_row_below_the_threshold_is_flagged():
     method = engine._decide_method(0.6, "Etentje")
     _, _, guess = category_for(result(method, confidence=0.6), is_income=False)
     assert guess is not None
+
+
+# ── marked rows (a rule that is sure of little, plan 4.9 addendum) ───────────
+
+def test_a_marked_rule_row_keeps_its_category_with_a_question_mark_first():
+    marked = CategorizationResult("Persoonlijke verzorging", "Kruidvat", 1.0, "regex", marked=True)
+    assert category_for(marked, is_income=False) == ("Persoonlijke verzorging", "? Kruidvat", None)
+
+
+def test_an_unmarked_rule_row_has_no_question_mark():
+    assert category_for(result("regex"), is_income=False)[1] == "Picnic inkopen"
+
+
+def test_a_mark_never_turns_a_flagged_row_into_a_written_one():
+    low = CategorizationResult("Uit eten", "Guess", 0.4, "ai_manual_needed", marked=True)
+    category, _, guess = category_for(low, is_income=False)
+    assert category == PLACEHOLDER and guess is not None

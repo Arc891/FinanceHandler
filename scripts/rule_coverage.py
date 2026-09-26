@@ -29,6 +29,10 @@ from collections import Counter, defaultdict
 from types import SimpleNamespace
 
 from eval_categoriser import _name, _pct, score
+from finance_core.tx_features import (  # noqa: F401  (re-exported for the tests)
+    remittance_text as _remittance, tx_amount, tx_cents as _cents, tx_code, tx_day as _day,
+    tx_direction, tx_hour, tx_weekend, tx_words, tx_year,
+)
 
 GROUP_MIN = 3             # rows a counterparty group needs to be listed
 PURE_SHARE = 0.9          # a group this uniform is pure
@@ -64,9 +68,6 @@ KEY_TOKEN = re.compile(r"[^\W_]+")      # letters and digits, accented ones too
 # Between two key words in a pattern: what KEY_TOKEN splits on, and any
 # one-letter word the key left out (an initial: `jan p. bakker`).
 KEY_GAP = r"[\W_]+(?:[^\W_][\W_]+)*"
-TIME_OF_DAY = re.compile(r"(?<![\d:])([01]\d|2[0-3]):[0-5]\d(?![\d:])")
-CODE_SHAPE = re.compile(r"^[A-Z]{2,4}$")
-WORD = re.compile(r"[a-z]{3,}")
 
 
 # ── reading a row ───────────────────────────────────────────────────────────
@@ -78,10 +79,6 @@ def _counterparty(tx):
 
 def _iban(tx):
     return (tx.get("counterparty_iban") or "").strip()
-
-
-def _remittance(tx):
-    return " ".join(tx.get("remittance_information") or [])
 
 
 def merchant_key(tx) -> str:
@@ -107,57 +104,6 @@ def spaarpot_names():
     except ImportError:
         return []
     return list(SPAARPOT_UUID_MAP.values())
-
-
-def _day(tx):
-    from datetime import date
-    from finance_core.row_tuple import canonical_date
-    try:
-        return date.fromisoformat(canonical_date(tx.get("booking_date", "")))
-    except (TypeError, ValueError):
-        return None
-
-
-def tx_direction(tx):
-    return "in" if tx.get("credit_debit_indicator") == "CRDT" else "out"
-
-
-def tx_code(tx):
-    """The bank's transaction code (BEA, IDB, ...), or `other` if not code-shaped."""
-    parts = ((tx.get("bank_transaction_code") or {}).get("description") or "").split()
-    return parts[-1] if parts and CODE_SHAPE.match(parts[-1]) else "other"
-
-
-def tx_hour(tx):
-    """The hour of a time of day in the remittance text (card payments), or None."""
-    m = TIME_OF_DAY.search(_remittance(tx))
-    return int(m.group(1)) if m else None
-
-
-def tx_weekend(tx):
-    day = _day(tx)
-    return None if day is None else day.weekday() >= 5
-
-
-def tx_year(tx):
-    day = _day(tx)
-    return None if day is None else day.year
-
-
-def tx_amount(tx):
-    try:
-        return round(abs(float(tx["transaction_amount"]["amount"])), 2)
-    except (KeyError, TypeError, ValueError):
-        return None
-
-
-def _cents(tx):
-    amount = tx_amount(tx)
-    return None if amount is None else round(amount * 100)
-
-
-def tx_words(tx):
-    return set(WORD.findall(_remittance(tx).lower()))
 
 
 def feature_probe(pairs):

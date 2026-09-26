@@ -92,6 +92,17 @@ async def test_flagged_rows_carry_the_placeholder_and_their_guess_reaches_the_su
     assert [(f["ai_category"], f["ai_confidence"]) for f in flagged] == [("Uit eten", 0.4)]
 
 
+async def test_marked_rows_are_written_with_their_category_and_counted_apart(tmp_path):
+    env = Env(tmp_path)
+    rows = [row("10-06-2026", remittance="MARK x", seq="31"), row("11-06-2026", remittance="FLAG y")]
+    upload_id, report = await env.upload(rows)
+    written = {r[2]: r[3] for r in env.block_rows("06/2026", EXPENSES)}
+    assert written["? Shop 31"] == "Huishouden"
+    period = env.run(upload_id)["periods"][0]
+    assert (period["counts"]["marked"], period["counts"]["flagged"]) == (1, 1)
+    assert "1 flagged, 1 marked" in report.text
+
+
 async def test_flagged_lines_beyond_the_cap_go_to_an_attachment(tmp_path):
     env = Env(tmp_path, summary_flagged_lines=3)
     rows = [row(f"{10 + i}-06-2026", remittance=f"FLAG {i}") for i in range(5)]

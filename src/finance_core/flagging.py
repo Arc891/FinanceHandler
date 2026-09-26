@@ -12,6 +12,7 @@ from typing import Any, Dict, Optional, Tuple
 from constants import ExpenseCategory, IncomeCategory
 
 PLACEHOLDER = ExpenseCategory.NOG_IN_TEDELEN.value
+MARK = "?"          # starts the description of a row a rule marked for the user to check
 _PLACEHOLDERS = {ExpenseCategory.NOG_IN_TEDELEN.value,
                  IncomeCategory.NOG_IN_TEDELEN.value}
 
@@ -28,11 +29,15 @@ def category_for(result, is_income: bool
 
     The guess is None exactly when the row is not flagged. A confident
     result whose category is a placeholder still counts as flagged, so the
-    flagged count equals the placeholder rows in the sheet.
+    flagged count equals the placeholder rows in the sheet. A marked result
+    keeps its category, with MARK before its description.
     """
     if (result.method in ("regex", "ai_auto")
             and result.category not in _PLACEHOLDERS):
-        return result.category, full_description(result), None
+        description = full_description(result)
+        if getattr(result, "marked", False):
+            description = f"{MARK} {description}".strip()
+        return result.category, description, None
     placeholder = (IncomeCategory.NOG_IN_TEDELEN if is_income
                    else ExpenseCategory.NOG_IN_TEDELEN).value
     return placeholder, full_description(result) or None, {

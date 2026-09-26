@@ -99,7 +99,7 @@ CATEGORIZATION_RULES_EXPENSE = {
     r"Vigola": ("{c} delicatessen", ExpenseCategory.BOODSCHAPPEN),
 
     # Dates/uitjes
-    r"snack company|snackbar traay": ("{c} eten", ExpenseCategory.DATES_UITJES),
+    r"snack company|snackbar traay": ("{c} eten", ExpenseCategory.BOODSCHAPPEN),
 
     # Gas/water/electra
     r"vitens": ("{c} water", ExpenseCategory.GAS_WATER_ELECTRA),
@@ -139,6 +139,17 @@ CATEGORIZATION_RULES_EXPENSE = {
     # Zorgverzekering
     r"zilveren kruis|de christelijke zorg": ("{c} zorgverzekering", ExpenseCategory.ZORGVERZEKERING),
 }
+
+# Checked before the rule tables: (pattern, condition, (template,
+# category)), the condition as in finance_core.rule_conditions. Roles come from
+# ACCOUNT_ROLES in the local config.
+CONDITIONAL_RULES_EXPENSE = []
+
+CONDITIONAL_RULES_INCOME = [
+    # She passes on her Gemeente money from her own account with the word
+    # "salaris": the sending account decides, not the word.
+    (r"salaris", "role=partner_personal", ("Gemeente uitkering", IncomeCategory.GEMEENTE)),
+]
 
 CATEGORIZATION_RULES_INCOME = {
     r"DUO": ("{c} uitkering", IncomeCategory.OVERHEID),

@@ -143,7 +143,7 @@ def _period_line(p: dict) -> str:
     if p.get("created"):
         parts.append("sheet created")
     if p.get("categorised"):
-        parts.append(f"{c['flagged']} flagged")
+        parts.append(f"{c['flagged']} flagged, {c.get('marked', 0)} marked")
     return ", ".join(parts)
 
 
@@ -527,9 +527,11 @@ class Pipeline:
             return self._fail(run, p, f"categorisation failed: {_error(exc)}")
         rows = {"expenses": [], "income": []}
         flagged = []
+        marked = 0
         for tx, result in zip(txs, results):
             row, guess = apply_category(tx, result)
             rows[block_for(row).name].append(row)
+            marked += bool(result.marked and not guess)
             if guess:
                 cells = format_transaction_for_sheet(row)
                 flagged.append({"key": strong_key(tx), "date": tx["booking_date"],
@@ -537,6 +539,7 @@ class Pipeline:
         p["rows"] = rows
         p["flagged"] = flagged
         p["counts"]["flagged"] = len(flagged)
+        p["counts"]["marked"] = marked
         p["categorised"] = True
         p["status"] = rs.CATEGORISED
         self.store.save(run)

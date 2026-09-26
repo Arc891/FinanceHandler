@@ -114,8 +114,9 @@ def test_engine_regex_pass_does_not_import_the_ui_module(monkeypatch):
     monkeypatch.setitem(sys.modules, "finance_core.ui.transaction_prompt",
                         None)
     engine = CategorizationEngine(ai_enabled=False)
-    assert engine._apply_regex_rules(expense("PICNIC")) == (
-        ExpenseCategory.BOODSCHAPPEN.value, "Picnic inkopen")
+    got = engine._apply_regex_rules(expense("PICNIC"), [])
+    assert (got.category, got.description, got.method) == (
+        ExpenseCategory.BOODSCHAPPEN.value, "Picnic inkopen", "regex")
 
 
 # ── which rule fired (rule coverage report) ─────────────────────────────────

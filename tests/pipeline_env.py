@@ -43,7 +43,7 @@ class FakeEngine:
     Stands in for CategorizationEngine.batch_categorize.
 
     Income is regex-matched; an expense whose remittance contains FLAG comes
-    back below the threshold; SAME gives every such row the description
+    back below the threshold, one with MARK from a marked rule; SAME gives every such row the description
     "Same"; every other expense is ai_auto. Once the clock
     has passed the deadline, AI rows come back 'none', as the real engine's
     cancelled chunks do. ``before_call(label)`` runs at the start of each call.
@@ -72,6 +72,8 @@ class FakeEngine:
                 results.append(CategorizationResult(None, None, 0.0, "none"))
             elif "SAME" in rem:                    # distinct transactions, identical sheet rows
                 results.append(CategorizationResult("Boodschappen", "Same", 0.9, "ai_auto"))
+            elif "MARK" in rem:
+                results.append(CategorizationResult("Huishouden", f"Shop {seq}", 1.0, "regex", marked=True))
             elif "FLAG" in rem:
                 results.append(CategorizationResult("Uit eten", f"Guess {seq}", 0.4, "ai_manual_needed"))
             else:

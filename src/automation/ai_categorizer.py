@@ -408,7 +408,8 @@ Respond ONLY with the JSON object, nothing else. Remember: description must be i
         """
         prompt = self._build_batch_prompt(
             chunk_anon, anon_precategorized, precategorized_transactions,
-            expense_categories, income_categories, example_rules, chunk_ids
+            expense_categories, income_categories, example_rules, chunk_ids,
+            orig_to_categorize=chunk_orig
         )
 
         try:
@@ -522,9 +523,16 @@ Respond ONLY with the JSON object, nothing else. Remember: description must be i
 
     def _build_batch_prompt(
         self, anon_to_categorize, anon_precategorized, orig_precategorized,
-        expense_categories, income_categories, example_rules, t_ids
+        expense_categories, income_categories, example_rules, t_ids,
+        orig_to_categorize=None
     ) -> str:
-        """Build the batch categorization prompt."""
+        """Build the batch categorization prompt.
+
+        A row's `pot_hint` (finance_core.pot_links: a savings transfer of the
+        same amount) is shown in its Hint column; it names no account.
+        """
+        hints = [t.get("pot_hint") or "-" for t in orig_to_categorize or []]
+        hints += ["-"] * (len(anon_to_categorize) - len(hints))
         # Format categories
         expense_list = "\n".join(f"- {cat}" for cat in expense_categories.keys())
         income_list = "\n".join(f"- {cat}" for cat in income_categories.keys())
@@ -558,13 +566,13 @@ Respond ONLY with the JSON object, nothing else. Remember: description must be i
 
         # Format transactions to categorize
         to_cat_rows = []
-        for tid, anon_tx in zip(t_ids, anon_to_categorize):
+        for tid, anon_tx, hint in zip(t_ids, anon_to_categorize, hints):
             tx_type = "INCOME" if anon_tx.get('credit_debit_indicator') == 'CRDT' else "EXPENSE"
             to_cat_rows.append(
                 f"| {tid} | {anon_tx.get('booking_date', '?')} "
                 f"| {tx_type} | {anon_tx.get('transaction_amount', 0):.2f} "
                 f"| {anon_tx.get('creditor', 'Unknown')} "
-                f"| {anon_tx.get('remittance_information', '')[:80]} |"
+                f"| {anon_tx.get('remittance_information', '')[:80]} | {hint} |"
             )
         to_cat_text = "\n".join(to_cat_rows)
 
@@ -586,8 +594,8 @@ Respond ONLY with the JSON object, nothing else. Remember: description must be i
 {precat_text}
 
 ## Transactions to Categorize:
-| # | Date | Type | Amount EUR | Counterparty | Description |
-|---|------|------|-----------|--------------|-------------|
+| # | Date | Type | Amount EUR | Counterparty | Description | Hint |
+|---|------|------|-----------|--------------|-------------|------|
 {to_cat_text}
 
 ## Instructions:
@@ -601,6 +609,9 @@ Respond ONLY with the JSON object, nothing else. Remember: description must be i
       - Expense description: append "(deels uit spaarpot)"
       - Income from savings accounts → use "Spaarrekening" category
    b. Same counterparty across transactions → use consistent categories.
+   c. A Hint that an expense has the same amount as a transfer in from the savings
+      account suggests it was paid from a pot ("Uit spaarpotje"), unless it is a
+      regular bill or subscription. It is a hint, not proof.
 5. Pre-categorized (C-rows) are final. Use them for context only.
 
 ## Response (JSON only, no markdown code blocks):

@@ -17,8 +17,11 @@ from dataclasses import dataclass
 
 from automation.ai_categorizer import ClaudeCategorizer
 from constants import ExpenseCategory, IncomeCategory
-from finance_core.categorization_rules import apply_categorization_rules
+from finance_core.categorization_rules import rule_result
 from finance_core.config_access import setting
+from finance_core.local_rules import default_local_rules
+from finance_core.pot_links import pot_hints
+from finance_core import tx_features
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +47,7 @@ class CategorizationResult:
     reasoning: Optional[str] = None
     linked_transactions: Optional[list] = None  # indices of related transactions
     description_suffix: Optional[str] = None  # e.g. "(voor Roompot)"
+    marked: bool = False  # a rule unsure enough that the user should check the row
 
 
 class CategorizationEngine:
@@ -98,18 +102,10 @@ class CategorizationEngine:
         Returns:
             CategorizationResult with category, description, confidence, and method
         """
-        # Step 1: Try regex categorization
-        regex_category, regex_description = self._apply_regex_rules(
-            transaction)
-
-        if regex_category:
-            logger.debug(f"Regex match: {regex_category}")
-            return CategorizationResult(
-                category=regex_category,
-                description=regex_description,
-                confidence=1.0,
-                method='regex'
-            )
+        # Step 1: Try the rules
+        matched = self._apply_regex_rules(transaction, default_local_rules())
+        if matched:
+            return matched
 
         # Step 2: Try AI categorization (if enabled)
         if self.ai_enabled and self.ai_categorizer:
@@ -125,18 +121,19 @@ class CategorizationEngine:
         )
 
     def _apply_regex_rules(
-        self, transaction: Dict[str, Any]
-    ) -> Tuple[Optional[str], Optional[str]]:
-        """
-        Apply regex categorization rules.
-
-        Returns (category, description) or (None, None) if no match.
-        """
+        self, transaction: Dict[str, Any], local_rules
+    ) -> Optional[CategorizationResult]:
+        """The first matching rule's result (method 'regex'), or None."""
         try:
-            return apply_categorization_rules(transaction)
+            got = rule_result(transaction, local_rules)
         except Exception as e:
             logger.error(f"Error applying regex rules: {e}")
-            return None, None
+            return None
+        if got is None:
+            return None
+        category, description, marked = got
+        return CategorizationResult(category=category, description=description,
+                                    confidence=1.0, method='regex', marked=marked)
 
     def _decide_method(self, confidence: float, description: str) -> str:
         """
@@ -234,8 +231,15 @@ class CategorizationEngine:
         gets no AI answer comes back with method 'none'. max_parallel
         overrides config AI_MAX_PARALLEL_CHUNKS.
 
+        A row no rule covers that exactly equals one transfer in from the
+        savings account nearby goes to the AI with a `pot_hint` (a copy of
+        the row; the input is not changed).
+
         Returns list of CategorizationResult, one per input transaction.
+        Raises LocalRulesError, before any work, when the local rules file
+        has a bad line.
         """
+        local_rules = default_local_rules()
         results: list[Optional[CategorizationResult]] = [None] * len(transactions)
 
         # Pass 1: regex on all transactions
@@ -243,15 +247,16 @@ class CategorizationEngine:
         unmatched = []      # (index, tx)
 
         for i, tx in enumerate(transactions):
-            cat, desc = self._apply_regex_rules(tx)
-            if cat:
-                result = CategorizationResult(
-                    category=cat, description=desc,
-                    confidence=1.0, method='regex')
+            result = self._apply_regex_rules(tx, local_rules)
+            if result:
                 results[i] = result
                 regex_matched.append((i, tx, result))
             else:
                 unmatched.append((i, tx))
+
+        savings = set(tx_features.account_roles().get("savings", []))
+        hints = pot_hints(transactions, [i for i, _ in unmatched], savings) if savings else {}
+        unmatched = [(i, {**tx, "pot_hint": hints[i]} if i in hints else tx) for i, tx in unmatched]
 
         logger.info(
             f"Regex pass: {len(regex_matched)} matched, "

@@ -12,6 +12,7 @@
 src/config/config_settings.py
 config_local.py
 src/config/google_service_account.json
+src/config/local_rules.tsv
 
 # Discord bot token and API keys
 discord_token.txt

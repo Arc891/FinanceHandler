@@ -2431,6 +2431,48 @@ measures them on months where the right answer is already known.
     recurring amount is any amount paid in 3 or more different months,
     so both free money amounts count; `--recent-from MM/YYYY` starts the
     window (default the last 12 sheet months).
+  - Fourth real run (2026-09-26, window 02/2025-12/2025, 11 months,
+    115.9 rows a month): rows that need the user 27.9 -> 21.4 a month,
+    written wrong unmarked 12.9 -> 10.9; new rules write 14.2 rows a
+    month, keep and split 110 / 111 right. Decisions: keep 13, split 1
+    (N10, by code), review 3, gd 6, drop 46 (8 not seen, 16 too few,
+    22 mixed). N07 still splits on nothing (free money is 6 of its 11
+    rows); an account-role rule in step 2 is the tool for it. Goeie
+    doelen: 116 / 171 caught with the proposals, 28 other rows marked.
+  - User decisions (2026-09-26): the decisions are made in
+    `rule-draft-7.txt` (first words only); N07 may become "from an amount
+    of 100-150 -> Persoonlijk vrij geld, else the AI", the cut chosen by
+    measuring 100, 125 and 150; the decided rules live in a local,
+    git-ignored file; a marked row starts its description with `? `; pot
+    links are context for the AI. The 2026 export (01-01 to 26-09) is on
+    the Pi as `/tmp/eval/asn-2026.csv`.
+  - Done 2026-09-26 (me), step 2, 695 tests green:
+    - `finance_core/tx_features.py`: what a row holds (code, amount, time
+      of day, weekday, words, account role from `ACCOUNT_ROLES`), shared
+      with `rule_coverage.py`. `finance_core/rule_conditions.py`: a
+      rule's condition in short words (`code=BEA`, `amount>=100`,
+      `amount=100.00/125.00`, `hour<12.5`, `weekend`, `word=premie`,
+      `role=savings`, and their negations).
+    - `finance_core/local_rules.py`: `src/config/local_rules.tsv`
+      (`LOCAL_RULES_PATH`, git-ignored), one rule per line: direction,
+      pattern, condition, category or `ai` (stop, the AI decides), mark,
+      description. A bad line stops the upload with its line number and
+      the problem, never its text; the file is read again when it changes.
+    - Rule order: `CONDITIONAL_RULES_*` in `constants.py`, the tables in
+      `constants.py`, then the local rules. `salaris` from
+      `partner_personal` is `Gemeente uitkering`; the snackbar rule is
+      Boodschappen.
+    - A marked rule row is written with its category and `? ` before its
+      description; the summary reads `N flagged, M marked`.
+    - A purchase no rule covers that equals exactly one transfer in from
+      the savings account within 7 days (and that transfer no other
+      purchase) goes to the AI with a Hint column in the prompt.
+    - `scripts/apply_rule_draft.py DRAFT OUT` turns the draft's decisions
+      into the rules file (a split becomes one line per branch plus an
+      `ai` line; `gd` marks BEA rows), refuses a line it cannot carry out
+      by group id and writes nothing then, prints counts only, writes
+      0600. A round-trip test checks the converted rules decide every
+      synthetic row as the draft proposed.
   - Holdout: 2026 is not looked at while choosing rules. Once the rules
     are in, the 2026 months already categorised by hand (January to
     21 May) score them, with an export of those months (`--years 2026`).

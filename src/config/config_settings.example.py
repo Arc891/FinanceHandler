@@ -118,6 +118,16 @@ AI_BUDGET_TRIP_ACTION = "write_flagged"  # or "stop": later periods wait for /re
 SUMMARY_FLAGGED_LINES = 40      # flagged rows listed in the summary; the rest go in an attachment
 AI_CATEGORIZATION_ENABLED = False  # Enable after Session 2
 
+# Rules beyond constants.py. The household's own accounts, by role, for rules
+# that check who sent or received the money (IBANs; spaces and case ignored).
+ACCOUNT_ROLES = {
+    "savings": [],            # the savings account the pots live in
+    "partner_personal": [],   # her personal account
+    "user_personal": [],      # your personal accounts
+}
+# The household's own rules (git-ignored; written by scripts/apply_rule_draft.py).
+LOCAL_RULES_PATH = "src/config/local_rules.tsv"
+
 # Automation Schedule
 AUTO_DOWNLOAD_ENABLED = False  # Enable after n8n is set up
 AUTO_DOWNLOAD_TIME = "08:00"  # Run 1hr before daily reminder
@@ -200,6 +210,8 @@ __all__ = [
     "AI_BUDGET_TRIP_ACTION",
     "SUMMARY_FLAGGED_LINES",
     "AI_CATEGORIZATION_ENABLED",
+    "ACCOUNT_ROLES",
+    "LOCAL_RULES_PATH",
     "AUTO_DOWNLOAD_ENABLED",
     "AUTO_DOWNLOAD_TIME",
     "AUTO_DOWNLOAD_DAYS_BACK",
