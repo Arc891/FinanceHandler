@@ -138,18 +138,60 @@ def test_create_passes_the_templates_locale_time_zone_and_recalc(tmp_path):
     assert (locale, tz, recalc) == ("nl_NL", "Europe/Monaco", "ON_CHANGE")
 
 
-def test_copy_order_is_transactions_rename_summary_rename_delete_reorder(tmp_path):
+def test_copy_order_is_transactions_rename_summary_rename_rebind_delete_reorder(tmp_path):
     wb, path = seeded(tmp_path, ["06/2026"])
     registry(wb, path).resolve("07/2026")
     steps = [(op, args[-1] if op == "rename_tab" else None)
-             for op, *args in wb.ops("copy_tab", "rename_tab", "delete_tab", "move_tab")]
+             for op, *args in wb.ops("copy_tab", "rename_tab", "rebind_validations", "delete_tab", "move_tab")]
     assert steps == [("copy_tab", None), ("rename_tab", "Transactions"),
                      ("copy_tab", None), ("rename_tab", "Summary"),
+                     ("rebind_validations", None),
                      ("delete_tab", None), ("move_tab", None)]
     copies = wb.ops("copy_tab")
     tabs = wb.books[FakeWorkbooks.TEMPLATE_ID]
     assert copies[0][2] == tabs.worksheet("Transactions").id
     assert copies[1][2] == tabs.worksheet("Summary").id
+
+
+def test_created_months_dropdowns_are_bound_to_its_own_summary(tmp_path):
+    # Transactions is copied before the new workbook has a Summary, so its
+    # category rules arrive unbound: every value read "Ongeldig" (07/2026 live)
+    wb, path = seeded(tmp_path, ["06/2026"])
+    sh = registry(wb, path).resolve("07/2026").spreadsheet
+    rules = sh.transactions.validations
+    assert rules["E5"]["bound"] and rules["J5"]["bound"]
+    (_, sheet_id, tab_id), = wb.ops("rebind_validations")
+    assert (sheet_id, tab_id) == (sh.id, sh.transactions.id)
+
+
+def test_fidelity_leaves_the_templates_row_formats_in_the_first_data_row(tmp_path):
+    # The probe row used to be blanked with RAW "", which strips the number
+    # format: the first amount of 07-10/2026 showed as a bare number
+    wb, path = seeded(tmp_path, ["06/2026"])
+    sh = registry(wb, path).resolve("07/2026").spreadsheet
+    template = wb.books[FakeWorkbooks.TEMPLATE_ID].transactions
+    for col in (2, 3, 7, 8):                                   # B, C, G, H
+        assert sh.transactions.formats.get((5, col)) == template.formats[(5, col)]
+
+
+def test_fidelity_fails_when_row_formats_differ_from_the_next_row(tmp_path):
+    wb, path = seeded(tmp_path, ["06/2026"])
+    template = wb.books[FakeWorkbooks.TEMPLATE_ID].transactions
+    template.formats.pop((5, 3))
+    with pytest.raises(SheetLayoutError, match="C5"):
+        registry(wb, path).resolve("07/2026")
+    assert wb.created_ids() == []
+
+
+def test_fidelity_fails_when_a_category_is_not_exactly_a_summary_label(tmp_path):
+    # SUMIF ignores case, so 'abonnementen' still counts, but a label that
+    # differs from what the bot writes is how rows drop out of the totals
+    wb, path = seeded(tmp_path, ["06/2026"])
+    wb.summary_kw = {"relabel": {"Abonnementen": "abonnementen"}}
+    with pytest.raises(SheetLayoutError, match="'Abonnementen'"):
+        registry(wb, path).resolve("07/2026")
+    assert wb.created_ids() == []
+    assert "07/2026" not in load_index(path)
 
 
 def test_created_workbook_has_summary_first_and_no_default_tab(tmp_path):

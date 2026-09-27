@@ -10,7 +10,12 @@ FakeWorksheet models what matters for the append contract (plan 4.5, 4.6):
     nl_NL parse: "DD-MM-YYYY" becomes a serial, "12,34" becomes 12.34, and "12.34"
     stays text ('.' is the thousands separator there). RAW stores values as given;
   - writing past ``row_count`` fails like the API's "exceeds grid limits";
-  - ``update_faults`` injects failures before or after the mutation lands.
+  - ``update_faults`` injects failures before or after the mutation lands;
+  - ``formats`` holds number formats: a RAW "" write strips a cell's format (live
+    sandbox, 2026-09-27) while ``batch_clear`` keeps it;
+  - ``notes`` holds cell notes, which a values write never moves;
+  - a validation rule carries ``bound``: copied into a workbook that lacks the
+    sheet it names, it stays unbound (every value reads "Ongeldig") until re-set.
 """
 
 import re
@@ -19,6 +24,8 @@ import time
 from datetime import date, timedelta
 
 import gspread
+
+from constants import ExpenseCategory, IncomeCategory
 
 EPOCH = date(1899, 12, 30)
 _CELL_RE = re.compile(r"^([A-Z]+)(\d*)$")
@@ -94,6 +101,9 @@ class FakeWorksheet:
         self.id = None
         self.validations = {}      # "E5" -> {"type": ..., "values": [...]}
         self.date_columns = set()  # column numbers formatted as dates (rendered DD-MM-YYYY)
+        self.formats = {}          # (row, col) -> number format type ("DATE", "CURRENCY")
+        self.notes = {}            # (row, col) -> note text
+        self.note_faults = []      # exceptions raised by update_notes, consumed per call
         self._mutex = threading.Lock()
 
     # gspread surface ------------------------------------------------------
@@ -147,6 +157,8 @@ class FakeWorksheet:
             for i, row in enumerate(values):
                 for j, v in enumerate(row):
                     self.cells[(r1 + i, c1 + j)] = convert(v)
+                    if option == "RAW" and v == "":
+                        self.formats.pop((r1 + i, c1 + j), None)
         self.calls.append(("update", range_name, option, [list(r) for r in values]))
         if fault and fault[0] == "after":
             raise fault[1]
@@ -164,11 +176,43 @@ class FakeWorksheet:
             self.col_count = cols
 
     def batch_clear(self, ranges):
+        self.calls.append(("batch_clear", list(ranges)))
         for rng in ranges:
             c1, r1, c2, r2 = parse_range(rng)
             for r in range(r1, (r2 or self._rows) + 1):
                 for c in range(c1, c2 + 1):
                     self.cells.pop((r, c), None)
+
+    def get_notes(self, default_empty_value="", grid_range=None):
+        c1, r1, c2, r2 = parse_range(grid_range) if grid_range else (1, 1, self.col_count, self._rows)
+        r2 = self._rows if r2 is None else r2
+        out = [[self.notes.get((r, c), default_empty_value) for c in range(c1, c2 + 1)]
+               for r in range(r1, r2 + 1)]
+        while out and all(v == default_empty_value for v in out[-1]):
+            out.pop()
+        for row in out:
+            while row and row[-1] == default_empty_value:
+                row.pop()
+        return out
+
+    def update_notes(self, notes):
+        if self.note_faults:
+            raise self.note_faults.pop(0)
+        self.calls.append(("update_notes", dict(notes)))
+        for a1, text in notes.items():
+            c, r, _, _ = parse_range(a1)
+            if text:
+                self.notes[(r, c)] = text
+            else:
+                self.notes.pop((r, c), None)
+
+    def clear_notes(self, ranges):
+        self.calls.append(("clear_notes", list(ranges)))
+        for rng in ranges:
+            c1, r1, c2, r2 = parse_range(rng)
+            for r in range(r1, (r2 or self._rows) + 1):
+                for c in range(c1, c2 + 1):
+                    self.notes.pop((r, c), None)
 
     # test helpers -----------------------------------------------------------
     def put(self, top_left, rows):
@@ -246,8 +290,10 @@ def income_tx(date_str="24-06-2026", amount="314.10", name="DUO Hoofdrekening", 
 
 PLACEHOLDER = "! Nog in te delen !"
 HEADERS = ["Date", "Amount", "Description", "Category"]
-EXPENSE_CATEGORIES = ["Boodschappen", "Uit eten", "Abonnementen", "Vaste lasten"] + [PLACEHOLDER]
-INCOME_CATEGORIES = ["DUO", "Salaris", "Persoonlijke rekening"]
+# The template's labels are the bot's categories; the placeholder closes the
+# expense table and sits at H35 in the income table (make_summary)
+EXPENSE_CATEGORIES = [c.value for c in ExpenseCategory if c.value != PLACEHOLDER] + [PLACEHOLDER]
+INCOME_CATEGORIES = [c.value for c in IncomeCategory if c.value != PLACEHOLDER]
 _COL = {c: col_index(c) for c in "BCDEGHIJKL"}
 
 
@@ -255,12 +301,15 @@ def make_transactions(rows=77):
     ws = FakeWorksheet("Transactions", rows=rows)
     ws.put("B4", [HEADERS + [""] + HEADERS])
     ws.date_columns = {col_index("B"), col_index("G")}
-    ws.validations = {"E5": {"type": "ONE_OF_RANGE", "values": ["=Summary!$B$27:$C"]},
-                      "J5": {"type": "ONE_OF_RANGE", "values": ["=Summary!$H$27:$I$44"]}}
+    ws.validations = {"E5": {"type": "ONE_OF_RANGE", "values": ["=Summary!$B$27:$C"], "bound": True},
+                      "J5": {"type": "ONE_OF_RANGE", "values": ["=Summary!$H$27:$I$44"], "bound": True}}
+    for r in range(5, rows + 1):
+        for col, kind in (("B", "DATE"), ("C", "CURRENCY"), ("G", "DATE"), ("H", "CURRENCY")):
+            ws.formats[(r, col_index(col))] = kind
     return ws
 
 
-def make_summary(spreadsheet, *, income_bound=44, income_placeholder=True):
+def make_summary(spreadsheet, *, income_bound=44, income_placeholder=True, relabel=None):
     """
     Summary tab whose totals are live over ``spreadsheet``'s Transactions tab.
 
@@ -270,8 +319,9 @@ def make_summary(spreadsheet, *, income_bound=44, income_placeholder=True):
     formula reads #REF!, as a Summary copied before its Transactions would.
     """
     ws = FakeWorksheet("Summary", rows=60, cols=12)
-    ws.put("B28", [[c] for c in EXPENSE_CATEGORIES])
-    ws.put("H28", [[c] for c in INCOME_CATEGORIES])
+    relabel = relabel or {}
+    ws.put("B28", [[relabel.get(c, c)] for c in EXPENSE_CATEGORIES])
+    ws.put("H28", [[relabel.get(c, c)] for c in INCOME_CATEGORIES])
     if income_placeholder:
         ws.put("H35", [[PLACEHOLDER]])
 
@@ -400,8 +450,11 @@ class FakeWorkbooks:
         else:
             ws = FakeWorksheet(src.title, rows=src.row_count, cols=src.col_count)
             ws.cells = {k: v for k, v in src.cells.items()}
-            ws.validations = dict(src.validations) if self.copy_validations else {}
+            has_summary = any(t.title == "Summary" for t in dst.tabs)
+            ws.validations = ({k: dict(v, bound=has_summary) for k, v in src.validations.items()}
+                              if self.copy_validations else {})
             ws.date_columns = set(src.date_columns)
+            ws.formats = dict(src.formats)
         ws.title = f"Copy of {src.title}"
         ws.id = None
         dst.add(ws)
@@ -449,7 +502,26 @@ class FakeWorkbooks:
     def validation(self, sheet_id, a1):
         self._call("validation", sheet_id, a1)
         tab, cell = a1.split("!")
-        return self.books[sheet_id].worksheet(tab).validations.get(cell)
+        rule = self.books[sheet_id].worksheet(tab).validations.get(cell)
+        return {k: v for k, v in rule.items() if k != "bound"} if rule else None
+
+    def rebind_validations(self, sheet_id, tab_id):
+        """Re-set every rule on the tab as it is; binds to the sheets the workbook now has."""
+        self._call("rebind_validations", sheet_id, tab_id)
+        sh = self.books[sheet_id]
+        ws = sh.tab_by_id(tab_id)
+        titles = {t.title for t in sh.tabs}
+        for rule in ws.validations.values():
+            named = re.match(r"^=(\w+)!", rule["values"][0]) if rule.get("values") else None
+            rule["bound"] = bool(named) and named.group(1) in titles
+
+    def number_formats(self, sheet_id, a1):
+        """Number format type per cell of a one-row range, "" where there is none."""
+        self._call("number_formats", sheet_id, a1)
+        tab, rng = a1.split("!")
+        ws = self.books[sheet_id].worksheet(tab)
+        c1, r1, c2, _ = parse_range(rng)
+        return [ws.formats.get((r1, c), "") for c in range(c1, c2 + 1)]
 
     # helpers ----------------------------------------------------------------
     def ops(self, *names):

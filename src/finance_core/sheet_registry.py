@@ -11,6 +11,12 @@ is on, and the label is the month after the chronologically newest indexed
 one (the adjacency guard). A created month passes a fidelity check, including
 a behavioural totals check, before anything is written to the index.
 
+The template's tabs are copied one at a time, Transactions first, so its
+category rules arrive before the new workbook has a Summary and bind to
+nothing (every value then reads "Ongeldig"). They are re-set once both tabs
+exist. Cells are emptied with a clear, never a RAW "" write, which also strips
+the number format.
+
 ``GoogleWorkbooks`` is the thin adapter over gspread and the Sheets/Drive
 APIs; the registry depends only on its methods, which is what the tests fake.
 """
@@ -24,6 +30,7 @@ from typing import Callable, Optional
 import gspread
 from gspread.utils import ValueInputOption, ValueRenderOption
 
+from constants import ExpenseCategory, IncomeCategory
 from finance_core.config_access import project_path, setting
 from finance_core.google_auth import GoogleAuthError
 from finance_core.google_retry import status_of, with_retry
@@ -40,6 +47,10 @@ PLACEHOLDER = "! Nog in te delen !"     # ExpenseCategory.NOG_IN_TEDELEN and Inc
 FIDELITY_AMOUNT = 12.34
 TOLERANCE = 0.005
 COPIED_PROPERTIES = ("locale", "timeZone", "autoRecalc")
+# The Summary category tables (column, first row, last row; None = open-ended)
+# and the labels each must hold exactly: the bot's categories
+LABEL_TABLES = (("expense", "B", 27, None, tuple(c.value for c in ExpenseCategory)),
+                ("income", "H", 27, 44, tuple(c.value for c in IncomeCategory)))
 
 PeriodStatus = Callable[[str], Optional[str]]
 
@@ -211,6 +222,7 @@ class SheetRegistry:
                                what=f"copy {tab}")
                 retry(lambda: wb.rename_tab(new_id, copied, tab), what=f"rename {tab}")
                 tab_ids[tab] = copied
+            retry(lambda: wb.rebind_validations(new_id, tab_ids[TRANSACTIONS_TAB]), what="rebind validation")
             retry(lambda: wb.delete_tab(new_id, default_tab), what="delete default tab")
             retry(lambda: wb.move_tab(new_id, tab_ids[SUMMARY_TAB], 0), what="reorder tabs")
             moved = bool(cfg.folder_id) and retry(lambda: wb.move_to_folder(new_id, cfg.folder_id),
@@ -261,10 +273,37 @@ class SheetRegistry:
         for key in COPIED_PROPERTIES:
             if props.get(key) != tmpl.get(key):
                 problems.append(f"{key} is {props.get(key)!r}, the template's is {tmpl.get(key)!r}")
+        problems += self._label_problems(sh)
         if not problems:
             problems += self._totals_check(sh, label)
+            problems += self._format_problems(sheet_id)
         if problems:
             raise SheetLayoutError(f"created month {label} failed the fidelity check: " + "; ".join(problems))
+
+    def _label_problems(self, sh) -> list:
+        """Every category the bot writes must be a Summary label, exactly (case included)."""
+        summary = sh.worksheet(SUMMARY_TAB)
+        problems = []
+        for name, col, first, last, wanted in LABEL_TABLES:
+            rng = f"{col}{first}:{col}{last or ''}"
+            got = self._retry(lambda: summary.get(rng), what=f"read {name} labels")
+            labels = {str(r[0]).strip() for r in got if r}
+            missing = [c for c in wanted if c not in labels]
+            if missing:
+                problems.append(f"the {name} table {SUMMARY_TAB}!{rng} lacks the label(s) "
+                                f"{', '.join(repr(c) for c in missing)}")
+        return problems
+
+    def _format_problems(self, sheet_id) -> list:
+        """After the probe, the first data row must keep the number formats of the row below it."""
+        start = int(setting("GSHEET_DATA_START_ROW", 5))
+        rows = [self._retry(lambda r=r: self.wb.number_formats(sheet_id, f"{TRANSACTIONS_TAB}!B{r}:J{r}"),
+                            what=f"read formats row {r}") for r in (start, start + 1)]
+        width = max(len(rows[0]), len(rows[1]))
+        first, below = (list(r) + [""] * (width - len(r)) for r in rows)
+        return [f"{TRANSACTIONS_TAB}!{chr(ord('B') + i)}{start} has number format {a or 'none'!r}, "
+                f"the row below {b or 'none'!r}"
+                for i, (a, b) in enumerate(zip(first, below)) if a != b]
 
     def _totals_check(self, sh, label) -> list:
         """
@@ -312,9 +351,7 @@ class SheetRegistry:
             if any("#REF!" in str(v) for r in rendered for v in r):
                 problems.append("Summary contains #REF!")
         finally:
-            blank = [["", "", "", ""]]
-            tx_ws.update(values=blank, range_name=EXPENSES.a1(start, start), value_input_option=ValueInputOption.raw)
-            tx_ws.update(values=blank, range_name=INCOME.a1(start, start), value_input_option=ValueInputOption.raw)
+            tx_ws.batch_clear([EXPENSES.a1(start, start), INCOME.a1(start, start)])
         restored = totals()
         for cell in ("E26", "K26", "E17"):
             moved(base, restored, cell, 0.0)
@@ -391,6 +428,49 @@ class GoogleWorkbooks:
         got = self.sheets.sheets().copyTo(spreadsheetId=src_id, sheetId=tab_id,
                                           body={"destinationSpreadsheetId": dst_id}).execute()
         return got["sheetId"]
+
+    def rebind_validations(self, sheet_id, tab_id):
+        """
+        Re-set every data-validation rule on the tab as it is, one request per
+        run of equal rules in a column: a rule is bound to the sheets that
+        exist when it is set.
+        """
+        got = self.sheets.get(spreadsheetId=sheet_id, includeGridData=True,
+                              fields="sheets(properties(sheetId),data(startRow,startColumn,"
+                                     "rowData(values(dataValidation))))").execute()
+        cells = {}
+        for sheet in got.get("sheets", []):
+            if sheet["properties"]["sheetId"] != tab_id:
+                continue
+            for data in sheet.get("data", []):
+                r0, c0 = data.get("startRow", 0), data.get("startColumn", 0)
+                for i, row in enumerate(data.get("rowData", [])):
+                    for j, cell in enumerate(row.get("values", [])):
+                        if "dataValidation" in cell:
+                            cells[(c0 + j, r0 + i)] = cell["dataValidation"]
+        requests = []
+        for col, row in sorted(cells):
+            rule = cells[(col, row)]
+            last = requests[-1]["setDataValidation"] if requests else None
+            if (last and last["range"]["startColumnIndex"] == col and last["range"]["endRowIndex"] == row
+                    and last["rule"] == rule):
+                last["range"]["endRowIndex"] = row + 1
+                continue
+            requests.append({"setDataValidation": {"range": {
+                "sheetId": tab_id, "startRowIndex": row, "endRowIndex": row + 1,
+                "startColumnIndex": col, "endColumnIndex": col + 1}, "rule": rule}})
+        if requests:
+            self.sheets.batchUpdate(spreadsheetId=sheet_id, body={"requests": requests}).execute()
+
+    def number_formats(self, sheet_id, a1) -> list:
+        """The number format type of each cell of a one-row range, "" where there is none."""
+        got = self.sheets.get(spreadsheetId=sheet_id, ranges=[a1], includeGridData=True,
+                              fields="sheets.data.rowData.values.userEnteredFormat.numberFormat.type").execute()
+        try:
+            values = got["sheets"][0]["data"][0]["rowData"][0].get("values", [])
+        except (KeyError, IndexError):
+            return []
+        return [((v.get("userEnteredFormat") or {}).get("numberFormat") or {}).get("type", "") for v in values]
 
     def _batch(self, sheet_id, request):
         self.sheets.batchUpdate(spreadsheetId=sheet_id, body={"requests": [request]}).execute()
