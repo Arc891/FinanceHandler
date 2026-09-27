@@ -45,21 +45,15 @@ TIMEZONE = os.environ.get('TZ', 'UTC')
 # Enable/disable Google Sheets integration
 GOOGLE_SHEETS_ENABLED = True
 
-# Path to Google service account credentials JSON file
+# Service account key and single-sheet name from before the multi-month
+# upload; removed after the cutover (plan Phase 4 step 6). The inspection
+# scripts take the key file as --credentials instead.
 GOOGLE_CREDENTIALS_PATH = "src/config/google_service_account.json"
-
-# Google Sheets configuration
 GSHEET_NAME = "Test Automation Sheet"
-GSHEET_TAB = "Blad1"
-
-# Sheet Layout Configuration
-# The row number where transaction data starts (after headers)
-GSHEET_EXPENSE_START_ROW = 2  # Row for first expense transaction
-GSHEET_INCOME_START_ROW = 2   # Row for first income transaction
 
 # Multi-month upload (docs/plans/MULTI_MONTH_UPLOAD_PLAN.md 4.10)
 # The bot runs on the user's own Google account via an OAuth token made once
-# with scripts/google_login.py. "service_account" exists only during Phases 1-3.
+# with scripts/google_login.py. "service_account" exists only until the cutover.
 GOOGLE_AUTH_MODE = "oauth"
 GOOGLE_OAUTH_CLIENT_PATH = "data/google/oauth_client.json"
 GOOGLE_OAUTH_TOKEN_PATH = "data/google/authorized_user.json"
@@ -68,7 +62,7 @@ GSHEET_TEMPLATE_ID = "1OSi4W3B3PrfCTQyxt3OreLmqSs4nXY82Wlg1_eohTs8"
 GSHEET_FOLDER_ID = "1QoYs19vu04_DFIszlfWOJP7BoQLEtfaG"
 GSHEET_AUTO_CREATE = True
 GSHEET_CREATE_NONADJACENT = False               # only the month after the newest indexed one is created
-GSHEET_DATA_START_ROW = 5                       # replaces the two START_ROW keys in Phase 4
+GSHEET_DATA_START_ROW = 5                       # first data row of both blocks, below the headers
 SHEET_INDEX_PATH = "data/sheet_index.json"      # AUTHORITATIVE; back it up
 UPLOAD_LEDGER_PATH = "data/upload_ledger.json"
 PERIOD_STATE_PATH = "data/period_state.json"
@@ -90,9 +84,6 @@ PERIOD_LABEL_SPLIT_DAY = 15                     # boundary on day 15+ names the 
 # File Upload Configuration
 UPLOAD_DIR = "data/uploads"
 
-# Session Configuration
-SESSION_DIR = "data/sessions"
-
 # ─────────────────────────────────────────────────────────────────────────────
 # AUTOMATION CONFIGURATION (Session 1+)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -109,7 +100,6 @@ ASN_QR_TIMEOUT_SECONDS = 300  # 5 minutes for QR scan
 
 # AI Categorization (Session 2 - will be configured later)
 CLAUDE_API_KEY = os.environ.get('CLAUDE_API_KEY', '')
-CLAUDE_MODEL = "claude-3-5-haiku-20241022"
 AI_CONFIDENCE_THRESHOLD = 0.75  # below this an AI result is written flagged; set by the evaluation step
 AI_PER_TX_FALLBACK_LIMIT = 10   # per-row AI calls per period when a batch chunk fails
 AI_MAX_PARALLEL_CHUNKS = 3      # batch chunks in flight at once (one claude process each)
@@ -132,11 +122,6 @@ LOCAL_RULES_PATH = "src/config/local_rules.tsv"
 AUTO_DOWNLOAD_ENABLED = False  # Enable after n8n is set up
 AUTO_DOWNLOAD_TIME = "08:00"  # Run 1hr before daily reminder
 AUTO_DOWNLOAD_DAYS_BACK = 7   # Download last 7 days of transactions
-
-# Discord Approval Configuration (Session 3 - will be configured later)
-APPROVAL_CHANNEL_ID = 0  # Channel for approval requests
-APPROVAL_WEBHOOK_URL = ""  # Webhook for sending approvals
-PENDING_APPROVALS_FILE = "data/pending_approvals.json"
 
 # API Configuration (for n8n integration)
 API_ENABLED = True
@@ -168,9 +153,7 @@ os.makedirs(_bank_session_dir, exist_ok=True)
 
 # Log the loaded configuration for debugging
 logger = logging.getLogger(__name__)
-logger.debug(f"🔧 Loaded Google Sheets config: {GSHEET_NAME=}, {GSHEET_TAB=}")
-logger.debug(
-    f"🔧 Loaded row config: expense_start={GSHEET_EXPENSE_START_ROW}, income_start={GSHEET_INCOME_START_ROW}")
+logger.debug(f"🔧 Loaded Google Sheets config: {GSHEET_NAME_PATTERN=}, {GSHEET_DATA_START_ROW=}")
 logger.debug(
     f"🔧 Loaded reminder config: time={DAILY_REMINDER_TIME}, channel={REMINDER_CHANNEL_ID}, users={len(MENTION_USER_IDS)}")
 
@@ -189,11 +172,26 @@ __all__ = [
     "GOOGLE_SHEETS_ENABLED",
     "GOOGLE_CREDENTIALS_PATH",
     "GSHEET_NAME",
-    "GSHEET_TAB",
-    "GSHEET_EXPENSE_START_ROW",
-    "GSHEET_INCOME_START_ROW",
+    "GOOGLE_AUTH_MODE",
+    "GOOGLE_OAUTH_CLIENT_PATH",
+    "GOOGLE_OAUTH_TOKEN_PATH",
+    "GSHEET_NAME_PATTERN",
+    "GSHEET_TEMPLATE_ID",
+    "GSHEET_FOLDER_ID",
+    "GSHEET_AUTO_CREATE",
+    "GSHEET_CREATE_NONADJACENT",
+    "GSHEET_DATA_START_ROW",
+    "SHEET_INDEX_PATH",
+    "UPLOAD_LEDGER_PATH",
+    "PERIOD_STATE_PATH",
+    "RUNS_DIR",
+    "PERIOD_BOUNDARY_MARKERS",
+    "PERIOD_BOUNDARY_MIN_AMOUNT",
+    "PERIOD_MIN_DAYS",
+    "PERIOD_MAX_DAYS",
+    "PERIOD_STEP_DAYS",
+    "PERIOD_LABEL_SPLIT_DAY",
     "UPLOAD_DIR",
-    "SESSION_DIR",
     # Automation configs
     "BANK_SCRAPER_ENABLED",
     "BANK_SESSION_FILE",
@@ -202,7 +200,6 @@ __all__ = [
     "ASN_TRANSACTIONS_URL",
     "ASN_QR_TIMEOUT_SECONDS",
     "CLAUDE_API_KEY",
-    "CLAUDE_MODEL",
     "AI_CONFIDENCE_THRESHOLD",
     "AI_PER_TX_FALLBACK_LIMIT",
     "AI_MAX_PARALLEL_CHUNKS",
@@ -215,9 +212,6 @@ __all__ = [
     "AUTO_DOWNLOAD_ENABLED",
     "AUTO_DOWNLOAD_TIME",
     "AUTO_DOWNLOAD_DAYS_BACK",
-    "APPROVAL_CHANNEL_ID",
-    "APPROVAL_WEBHOOK_URL",
-    "PENDING_APPROVALS_FILE",
     "API_ENABLED",
     "API_HOST",
     "API_PORT",

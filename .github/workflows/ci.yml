@@ -62,7 +62,7 @@ jobs:
           python -c "
           import config.config_settings
           import bot_commands
-          from finance_core.export import process_csv_file
+          from finance_core.export import Pipeline, new_upload_id
           from finance_core.csv_helper import load_transactions_from_csv
           print('All imports successful')
           "

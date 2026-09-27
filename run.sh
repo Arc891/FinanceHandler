@@ -54,9 +54,13 @@ if [[ ! -f "src/config/config_settings.py" ]]; then
     exit 1
 fi
 
-if [[ ! -f "src/config/google_service_account.json" ]]; then
-    echo "⚠️  Warning: Google service account not found at src/config/google_service_account.json"
-    echo "Google Sheets integration will not work without this file"
+# The bot writes the sheets as the user, with the OAuth token made once on the
+# workstation by scripts/google_login.py and copied to data/google/.
+if [[ ! -f "data/google/authorized_user.json" ]]; then
+    echo "❌ Error: Google OAuth token not found at data/google/authorized_user.json"
+    echo "Run scripts/google_login.py on the workstation and copy the token (and"
+    echo "oauth_client.json) to data/google/ here, owner pi, mode 0600"
+    exit 1
 fi
 
 # Extract Discord token from local config for container
@@ -110,6 +114,10 @@ DOCKER_RUN_ARGS=(
     # Mount volumes for persistent data
     -v "$(pwd)/data:/app/data"
 
+    # The config (settings, local rules) is read from the checkout, not the
+    # image, so a setting change needs a restart instead of a rebuild
+    -v "$(pwd)/src/config:/app/src/config:ro"
+
     # Mount Claude Code CLI for AI categorization
     # Executable is read-only, config needs write access for logs/cache
     -v "$ACTUAL_USER_HOME/.local/bin/claude:/usr/local/bin/claude:ro"
@@ -127,7 +135,11 @@ echo "🔨 Building and deploying finance-automation-bot..."
 
 # Clean up Docker cache if force rebuild is requested
 if [[ $FORCE_REBUILD -eq 1 ]]; then
+    # data/ is a bind mount, not a volume, so the prune leaves it alone; it can
+    # remove the image now running, though. To keep a rollback, tag it first:
+    #   docker tag "$(docker inspect -f '{{.Image}}' finance-automation-bot)" finance-bot:pre-rebuild
     echo "🧹 Force rebuild requested - cleaning Docker cache..."
+    echo "   (data/ survives; an untagged previous image may not: docker tag it first to keep a rollback)"
     docker system prune -f --volumes || true
     docker builder prune -f || true
     # ADDITIONAL_FLAGS+=" --upgrade-minor"  # Force version bump
