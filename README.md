@@ -1,273 +1,179 @@
 # Discord Finance Automation Bot
 
-## Features
+A Discord bot for a household's monthly budget. Upload one or more ASN Bank CSV
+exports with `/upload`; the bot splits them into financial months, categorises
+every transaction (rules first, then Claude), and appends the rows to one Google
+spreadsheet per month, creating the next month's sheet from a template when it is
+missing.
 
-- 🤖 **Modern Discord Bot** with slash commands
-- 📄 **CSV Transaction Processing** from bank exports
-- 🏷 **Interactive Categorization** with Discord UI
-- 💾 **Session Management** for resuming interrupted processes
-- ⏰ **Daily Reminders** for transaction processing
-- 🎯 **Auto-categorization** with customizable rules
+There is no review step in Discord. Rows the bot is unsure about are written
+anyway, with the category `! Nog in te delen !` or a `? ` before the description,
+and the sheet is where you check them. An interrupted upload keeps its state and
+can be continued with `/resume`.
+
+Agent and developer detail (architecture, state files, recovery scripts) is in
+[AGENTS.md](AGENTS.md) and [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
+
+## How a month is processed
+
+1. `/upload` with up to five CSV exports. The command answers at once; progress
+   and the summary appear in your private `Approvals-<name>` thread.
+2. Rows present in several exports, or already written by an earlier upload, are
+   skipped.
+3. The rows are split into financial months. A month starts on the DUO or salary
+   income; one that arrives on day 15 or later names the next calendar month
+   (DUO on 24-03-2026 opens `04/2026`). A split that looks wrong writes nothing
+   unless you pass `force`.
+4. Each month's rows are categorised and appended below the rows already in its
+   sheet, which is then sorted by date.
+5. The summary lists the months, any sheets created, skipped rows, and the
+   flagged rows with the AI guess that was not used.
 
 ## Commands
 
-- `/upload` - Upload a CSV file to start processing transactions
-- `/resume` - Resume a previously paused session
-- `/status` - Check your current processing progress
-- `/cancel` - Cancel and clear your current session
-- `/cached` - View and process cached transactions
+All commands are limited to the household (`MENTION_USER_IDS`).
+
+| Command | Does |
+|---|---|
+| `/upload attachment [attachment2..5] [force]` | Process up to five ASN CSV exports |
+| `/resume [upload_id]` | Continue an unfinished run (newest by default) |
+| `/status` | Open runs, and per month what is not written yet |
+| `/cancel [upload_id] [confirm]` | Abandon an open run; never undoes a write |
+| `/sort [month]` | Sort one month (`MM/YYYY`) or every sheet the last run touched |
+| `/months list` | Which spreadsheet belongs to which month |
+| `/months register label url [force]` | Add a month sheet the bot did not create |
+
+A daily reminder to upload is posted in `REMINDER_CHANNEL_ID` at
+`DAILY_REMINDER_TIME`.
+
+## Checking the sheet
+
+Each month is a spreadsheet named `Maandelijks Budget MM/YYYY` with two tabs:
+
+- **Transactions**: expenses in columns B-E, income in G-J (date, amount,
+  description, category), data from row 5.
+- **Summary**: totals per category, starting balance in `L8`, closing balance in
+  `E17`. The starting balance of a created month is the previous month's closing
+  balance.
+
+After an upload, filter the Transactions tab on:
+
+- category `! Nog in te delen !`: the bot did not know, or the AI was not sure
+  enough. These amounts are still counted in the Summary under that category.
+- descriptions starting with `? `: a household rule chose the category but asked
+  for a check.
 
 ## Setup
 
 ### Prerequisites
 
-- Python 3.8+
-- Discord Bot Token
-- Virtual environment (recommended)
+- Python 3.12
+- A Discord bot token (Developer Portal, with the Message Content and Server
+  Members intents)
+- A Google Cloud OAuth client (desktop app) with the Sheets and Drive APIs enabled
+- The Claude Code CLI (`claude`) logged in, for AI categorisation. Without it the
+  bot runs on rules only and flags the rest.
 
-### Installation
+### Install
 
-1. **Clone the repository**
+```bash
+scripts/setup.sh          # venv, dependencies, config copy
 
-   ```bash
-   git clone <your-repo-url>
-   cd FinanceAutomation
-   ```
-
-2. **Create virtual environment**
-
-   ```bash
-   python -m venv venv
-   source venv/bin/activate  # On Windows: venv\Scripts\activate
-   ```
-
-3. **Install dependencies**
-
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-4. **Configure the bot**
-
-   ```bash
-   # Copy configuration template
-   cp src/config/config_settings.example.py src/config/config_settings.py
-
-   # Edit config_settings.py with your values
-   nano src/config/config_settings.py
-   ```
-
-5. **Set up Discord Bot**
-   - Go to [Discord Developer Portal](https://discord.com/developers/applications)
-   - Create a new application
-   - Go to "Bot" section
-   - Copy the token to your `src/config/config_settings.py` file
-   - Enable required intents: Message Content, Server Members
-
-6. **Set up Google Sheets (Optional)**
-
-   If you want to export transactions to Google Sheets:
-
-   a. Go to [Google Cloud Console](https://console.cloud.google.com/)
-   b. Create a new project or select an existing one
-   c. Enable the Google Sheets API and Google Drive API
-   d. Go to "Credentials" → "Create Credentials" → "Service Account"
-   e. Download the JSON key file
-   f. Save it as `src/config/google_service_account.json`
-   g. Share your Google Sheet with the service account email
-   h. Update your `src/config/config_settings.py` file with Google Sheets configuration
-
-7. **Run the bot**
-
-   ```bash
-   cd src
-   python bot.py
-   ```
-
-## Configuration
-
-### Main Configuration (config_settings.py)
-
-Edit `src/config/config_settings.py` to configure the bot:
-
-```python
-# Discord Bot Token (required)
-DISCORD_TOKEN = "your_discord_bot_token_here"
-
-# Daily Reminder Configuration
-DAILY_REMINDER_TIME = "09:00"  # 24-hour format
-REMINDER_CHANNEL_ID = 1234567890123456789  # Channel ID for reminders
-MENTION_USER_IDS = [
-    123456789012345678,  # Your Discord user ID
-    987654321098765432,  # Other user IDs
-]
-
-# CSV Download Link (optional)
-CSV_DOWNLOAD_LINK = ""  # URL where users can download CSV files
-
-# Google Sheets Configuration (optional)
-GOOGLE_SHEETS_ENABLED = True
-GSHEET_NAME = "Your Sheet Name"
-GSHEET_TAB = "Your Tab Name"
+# or by hand
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt -r requirements-dev.txt
+cp src/config/config_settings.example.py src/config/config_settings.py
 ```
 
-### User Mentions
+Fill in `src/config/config_settings.py`. The example file is the reference for
+every key and its default; the bot refuses to start and names the keys that are
+missing.
 
-Add Discord user IDs to the `MENTION_USER_IDS` list in `config_settings.py` for daily reminder mentions.
+### Google access
 
-## CSV Format
+The bot writes as your own Google account. Create the token once, on the
+workstation, in your own terminal:
 
-The bot expects CSV files with the following columns (ASN Bank format):
-
-- Date
-- Account IBAN
-- Counterparty IBAN
-- Counterparty Name
-- Transaction Amount
-- Currency
-- Transaction Code
-- Remittance Information
-
-## Customization
-
-### Categories
-
-Edit `src/constants.py` to customize income and expense categories:
-
-```python
-class ExpenseCategory(str, Enum):
-    FOOD = ("Food", r"food|restaurant|grocery")
-    TRANSPORT = ("Transport", r"transport|uber|taxi")
-    # Add your categories...
+```bash
+venv/bin/python scripts/google_login.py
 ```
 
-### Auto-categorization Rules
+It asks for exactly two scopes, `spreadsheets` and `drive.file`, and stores the
+token in `data/google/authorized_user.json` (the OAuth client goes in
+`data/google/oauth_client.json`). The script's docstring covers the browser steps.
 
-Add regex patterns in `src/constants.py`:
+Then tell the bot which spreadsheet belongs to which month, either with
+`/months register` from Discord or with `scripts/register_sheets.py`, and seed the
+period anchor and the dedup record from those sheets:
 
-```python
-CATEGORIZATION_RULES_EXPENSE = {
-    r"JUMBO|PICNIC|LIDL": ("Groceries", ExpenseCategory.FOOD),
-    r"Shell|BP|Texaco": ("Fuel", ExpenseCategory.TRANSPORT),
-    # Add your rules...
-}
+```bash
+venv/bin/python scripts/register_sheets.py list
+venv/bin/python scripts/seed_state.py
 ```
+
+`data/sheet_index.json` is the only record of which sheet is which month (the bot
+cannot search Drive), so back up `data/`.
+
+### Run
+
+```bash
+python src/bot.py         # locally
+
+./run.sh                  # Docker, as deployed on the Pi
+```
+
+`run.sh` checks for the config, a real Discord token and the Google token before
+it deploys, and mounts `data/` and `src/config` from the host, so a config change
+needs only `docker restart finance-automation-bot`. `./run.sh --force-rebuild`
+prunes Docker; tag the running image first if you want a rollback.
+
+### Tests
+
+```bash
+venv/bin/python -m pytest -q
+```
+
+The tests use fakes and an anonymised fixture; they never call Google.
+
+## Categories and rules
+
+Categorisation runs in this order:
+
+1. Conditional rules and rule tables in `src/constants.py` (merchant patterns).
+2. Household rules in `src/config/local_rules.tsv` (not in git: names and
+   amounts), one tab-separated rule per line; the format is described in
+   `src/finance_core/local_rules.py`.
+3. Claude, for everything no rule decides. Answers below
+   `AI_CONFIDENCE_THRESHOLD` (0.75) are written as `! Nog in te delen !`.
+
+A new category must also be added to the Summary tab of the template and of the
+existing months, because the Summary sums by category name. See "Adding
+Categories" in [AGENTS.md](AGENTS.md).
+
+## CSV format
+
+ASN Bank export with the columns Date, Account IBAN, Counterparty IBAN,
+Counterparty Name, Transaction Amount, Currency, Transaction Code and Remittance
+Information. The uploaded file is never changed.
+
+## When something goes wrong
+
+- A run stopped halfway: `/status`, then `/resume`. A write that failed is
+  checked against the sheet before anything is appended again.
+- Rows that could not be written are kept in `data/failed_uploads.json`:
+  `scripts/retry_failed_transactions.py --dry-run`, then without `--dry-run`.
+- To take a whole upload back out of the sheets:
+  `scripts/undo_upload.py <upload_id> --dry-run`, then without `--dry-run`.
 
 ## Security
 
-- Never commit your Discord bot token or API keys
-- Keep your `config_settings.py` file secure
-- Add `src/config/config_settings.py` to `.gitignore` if it contains sensitive data
-- Regularly rotate your bot token if compromised
-
-## Support
-
-If you encounter issues:
-
-1. Check the bot logs for error messages
-2. Verify your Discord bot permissions
-3. Ensure your CSV format matches the expected structure
-4. Check that all required configuration is set in `src/config/config_settings.py`
+- Never commit `src/config/config_settings.py`, `src/config/local_rules.tsv` or
+  anything under `data/`.
+- The bot logs labels and counts only, never names, descriptions or amounts.
+- Do not add Google Drive scopes beyond `drive.file`: the others are restricted
+  and need a paid security assessment.
 
 ## Changelog
 
-See [docs/CHANGES.md](docs/CHANGES.md) for detailed change history.
-
-### 5. Run the Bot
-
-```bash
-cd src
-python bot.py
-```
-
-## Usage
-
-### Slash Commands
-
-- `/upload` - Upload a CSV file to start processing transactions
-- `/status` - Check your current processing session status
-- `/resume` - Resume a previously paused session
-- `/cancel` - Cancel and clear your current session
-- `/cached` - View and process cached transactions
-
-### Daily Reminders
-
-The bot will send daily reminders at 09:00 (configurable) to upload CSV files for processing.
-
-## File Structure
-
-```txt
-/
-├── README.md                 # Project readme
-├── CLAUDE.md                 # Claude Code instructions
-├── docs/                     # Documentation
-│   ├── CHANGES.md           # Changelog
-│   ├── DEVELOPMENT.md       # Development guide
-│   └── automation/          # Automation docs
-├── scripts/                  # Utility scripts
-│   ├── setup.sh             # Quick setup
-│   ├── run.sh               # Docker deployment
-│   └── browsercode/         # Bank automation
-├── src/                      # Source code
-│   ├── bot.py               # Main entry point
-│   ├── bot_commands.py      # Slash commands
-│   ├── constants.py         # Categories & rules
-│   ├── config/              # Configuration (NOT in git)
-│   │   ├── config_settings.py
-│   │   └── google_service_account.json
-│   ├── api/                 # Automation API
-│   ├── automation/          # Bank scraper
-│   └── finance_core/        # Core finance logic
-│       ├── csv_helper.py
-│       ├── export.py
-│       ├── google_sheets.py
-│       ├── session_management.py
-│       └── ui/
-└── data/                     # Runtime data (NOT in git)
-    ├── sessions/            # User sessions
-    ├── uploads/             # CSV uploads
-    ├── bank_downloads/      # Downloaded CSVs
-    └── browser_profile/     # Browser session
-```
-
-## Environment Configuration
-
-- **Daily reminder time**: Edit `DAILY_REMINDER_TIME` in `config_settings.py`
-- **Upload directory**: Edit `UPLOAD_DIR` in `config_settings.py` (default: `data/uploads`)
-- **Session directory**: Edit `SESSION_DIR` in `config_settings.py` (default: `data/sessions`)
-- **Transaction categories**: Edit `ExpenseCategory` and `IncomeCategory` in `constants.py`
-- **Auto-categorization rules**: Edit `CATEGORIZATION_RULES_*` in `constants.py`
-
-### Data Directory Structure
-
-The bot uses a dedicated `data/` directory for runtime files:
-
-- `data/sessions/` - User session files for resuming interrupted processing
-- `data/uploads/` - Uploaded CSV files from Discord
-
-These directories are automatically created when the bot starts. This structure keeps source code separate from runtime data.
-
-## Troubleshooting
-
-### Import Errors
-
-Make sure you're running the bot from the `src/` directory:
-
-```bash
-cd src
-python bot.py
-```
-
-### Missing Dependencies
-
-Install missing packages:
-
-```bash
-pip install discord.py
-```
-
-### Bot Not Responding
-
-1. Check that the bot token is correct in `src/config/config_settings.py`
-2. Ensure the bot has proper permissions in your Discord server
-3. Check the console for error messages
+See [docs/CHANGES.md](docs/CHANGES.md).
