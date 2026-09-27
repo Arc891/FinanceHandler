@@ -144,3 +144,5 @@ Thumbs.db
 !tests/fixtures/*.csv
 
 /[A-Z_]*.md
+!/AGENTS.md
+!/CLAUDE.md
