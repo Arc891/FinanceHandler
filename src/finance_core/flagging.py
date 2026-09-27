@@ -59,4 +59,6 @@ def apply_category(tx: Dict[str, Any], result
     row["category"] = category
     if description:
         row["description"] = description
+    if guess:
+        row["ai_guess"] = guess          # shown in the row's note (sheet_writer.bank_note)
     return row, guess

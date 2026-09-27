@@ -18,6 +18,12 @@ Two row representations, never to be confused:
 ``commit_append`` is never retried: a values update is not idempotent, so a
 failed write is reconciled from the recorded baseline (plan 4.6), never
 repeated blind.
+
+Every appended row gets a note on its description cell with the bank's own
+text (``bank_note``), so a short description can still be checked. Notes are
+not part of a RowTuple. A values rewrite never moves a note, so compaction
+rewrites the notes in the new order; and it empties cells with a clear,
+because a RAW "" write also strips the cell's number format.
 """
 
 import hashlib
@@ -155,6 +161,48 @@ def as_text(v):
     return f"'{v}" if isinstance(v, str) and v else v
 
 
+def bank_note(tx) -> str:
+    """The note on a written row's description cell: the bank's text, and the AI's unused guess."""
+    name = (tx.get("debtor") or {}).get("name") or (tx.get("creditor") or {}).get("name") or ""
+    remittance = next((r for r in tx.get("remittance_information") or [] if r), "") or tx.get("remittance_raw", "")
+    lines = [f"{label}: {value.strip()}" for label, value in (
+        ("Tegenpartij", name), ("Rekening", tx.get("counterparty_iban") or ""), ("Omschrijving", remittance))
+        if value and value.strip()]
+    guess = tx.get("ai_guess") or {}
+    if guess.get("ai_category"):
+        confidence = guess.get("ai_confidence")
+        shown = f" ({confidence:.2f})".replace(".", ",") if isinstance(confidence, (int, float)) else ""
+        lines.append(f"AI-suggestie: {guess['ai_category']}{shown}")
+    return "\n".join(lines)
+
+
+def _note_col(block: Block) -> str:
+    return chr(ord(block.first_col) + 2)        # the description column: D or I
+
+
+def _write_notes(ws, block: Block, start: int, old, new) -> None:
+    """Rewrite the block's description notes from ``old`` to ``new`` (lists by row from ``start``)."""
+    col = _note_col(block)
+    changes = {}
+    for i in range(max(len(old), len(new))):
+        before = old[i] if i < len(old) else ""
+        after = new[i] if i < len(new) else ""
+        if before != after:
+            changes[f"{col}{start + i}"] = after
+    if changes:
+        with_retry(lambda: ws.update_notes(changes), what=f"write {block.name} notes")
+
+
+def read_notes(ws, block: Block, start: int, last: int) -> List[str]:
+    """The description notes from ``start`` to ``last``, "" where a row has none."""
+    if last < start:
+        return []
+    col = _note_col(block)
+    got = with_retry(lambda: ws.get_notes(grid_range=f"{col}{start}:{col}{last}"), what=f"read {block.name} notes")
+    notes = [(r[0] if r else "") for r in got]
+    return notes + [""] * (last - start + 1 - len(notes))
+
+
 def ensure_capacity(worksheet, last_row: int) -> None:
     if last_row > worksheet.row_count:
         new_rows = last_row + CAPACITY_BUFFER
@@ -188,6 +236,12 @@ def commit_append(spreadsheet, block: Block, txs, *, context=None, failed_path=N
             _log_failure(spreadsheet, block, txs, exc, context or {}, failed_path)
             raise
     logger.info("Appended %d %s rows to %s", len(cells), block.name, spreadsheet.id)
+    try:
+        # the rows landed; a note is a reading aid, so its failure fails nothing
+        _write_notes(ws, block, first, [""] * len(txs), [bank_note(tx) for tx in txs])
+    except Exception as exc:
+        logger.warning("Could not write the notes for %d %s rows in %s (%s)",
+                       len(txs), block.name, spreadsheet.id, type(exc).__name__)
     return pairs
 
 
@@ -227,10 +281,12 @@ def _refuse_if_appending(spreadsheet, is_appending: IsAppending) -> None:
 
 
 def compact_block(spreadsheet, block: Block, cells, *, is_appending: IsAppending,
-                  previous_last_row: int, worksheet=None) -> None:
+                  previous_last_row: int, worksheet=None, notes=None) -> None:
     """
     Rewrite the block from the start row with ``cells`` (raw values, RAW) and
-    blank the tail down to ``previous_last_row``.
+    clear the tail down to ``previous_last_row``. ``notes``, when given, is
+    (old, new): the description notes by row before, and in the order of
+    ``cells``; they are rewritten to match.
 
     Refuses for a spreadsheet with a period at `appending`: compaction shifts
     rows and would invalidate that period's positional baseline. The guard is
@@ -242,11 +298,20 @@ def compact_block(spreadsheet, block: Block, cells, *, is_appending: IsAppending
     end = max(previous_last_row, start + len(rows) - 1)
     if end < start:
         return
-    payload = rows + [["", "", "", ""] for _ in range(end - start + 1 - len(rows))]
     with _lock(spreadsheet.id):
         ws = worksheet or transactions_tab(spreadsheet)
-        ws.update(values=payload, range_name=block.a1(start, end),
-                  value_input_option=ValueInputOption.raw)
+        if rows:
+            ws.update(values=rows, range_name=block.a1(start, start + len(rows) - 1),
+                      value_input_option=ValueInputOption.raw)
+        if end >= start + len(rows):
+            ws.batch_clear([block.a1(start + len(rows), end)])
+        if notes is not None:
+            old, new = notes
+            try:
+                _write_notes(ws, block, start, old, new)
+            except Exception as exc:
+                logger.warning("Could not move the %s notes in %s with their rows (%s); "
+                               "notes may sit on the wrong rows", block.name, spreadsheet.id, type(exc).__name__)
 
 
 def _date_key(t) -> tuple:
@@ -261,13 +326,15 @@ def sort_by_date(spreadsheet, *, is_appending: IsAppending) -> Tuple[int, int]:
         ws = transactions_tab(spreadsheet)
         for block in (EXPENSES, INCOME):
             contents = read_block(spreadsheet, block, worksheet=ws)
-            rows = [(t, c) for t, c in zip(contents.tuples, contents.cells) if t]
-            ordered = sorted(rows, key=lambda rc: _date_key(rc[0]))     # stable
+            notes = read_notes(ws, block, contents.start, contents.last_row)
+            rows = [(t, c, n) for t, c, n in zip(contents.tuples, contents.cells, notes) if t]
+            ordered = sorted(rows, key=lambda rcn: _date_key(rcn[0]))     # stable
             counts.append(len(rows))
             if ordered == rows and len(rows) == len(contents.tuples):
                 continue
-            compact_block(spreadsheet, block, [c for _, c in ordered], is_appending=is_appending,
-                          previous_last_row=contents.last_row, worksheet=ws)
+            compact_block(spreadsheet, block, [c for _, c, _ in ordered], is_appending=is_appending,
+                          previous_last_row=contents.last_row, worksheet=ws,
+                          notes=(notes, [n for _, _, n in ordered]))
             logger.info("Sorted %d %s rows in %s", len(rows), block.name, spreadsheet.id)
     return counts[0], counts[1]
 
@@ -292,6 +359,8 @@ def remove_rows(spreadsheet, block: Block, rows, *, is_appending: IsAppending) -
                 keep[i] = False
                 removed += 1
         if removed:
+            notes = read_notes(ws, block, contents.start, contents.last_row)
             compact_block(spreadsheet, block, [c for c, k in zip(contents.cells, keep) if k],
-                          is_appending=is_appending, previous_last_row=contents.last_row, worksheet=ws)
+                          is_appending=is_appending, previous_last_row=contents.last_row, worksheet=ws,
+                          notes=(notes, [n for n, k in zip(notes, keep) if k]))
     return removed, sum(n for n in wanted.values() if n > 0)
