@@ -2492,6 +2492,30 @@ measures them on months where the right answer is already known.
       group's rows in the window from the cut up (top category and its
       share) and below it (their categories). Run it without
       `--local-rules` so the ids match draft 7.
+    - `apply_rule_draft.py` decision `cut=A`: the category from amount A
+      up, plain, and an `ai` line for smaller amounts.
+  - Measured 2026-09-27 (Pi, regex only, window 02/2025-12/2025):
+    - N07 cuts 100 / 125 / 150 all separate the 11 window rows alike (6
+      free money from the cut up, 5 others below); the user chose
+      `cut=125`, the middle of the gap.
+    - With the 33 local rules and the account roles, per month: 20.0 rows
+      need the user (1.3 marked, 18.8 flagged at the Sonnet rates), 10.0
+      written wrong unmarked; without local rules 27.9 and 12.5. In
+      sample (the rules were chosen on these months).
+  - Holdout 2026-09-27 (sheets 01/2026-05/2026, 529 rows scored, rules
+    fixed before it ran):
+    - Regex: 367 rows covered, 353 correct (96.2 %); local rules 51 rows,
+      44 correct, 4 marked. Misses: N22 line 20 1/3 (Persoonlijke
+      rekening, also its miss in 2025), N18, N39, N50 one row each.
+    - Sonnet, local rules, pot hints, threshold 0.75, one run, 5.6 min:
+      465/529 = 87.9 % correct; the AI 112/162 = 69.1 %. Flagged 78 of
+      162; written unflagged 84, 82.1 % correct. Per month: about 16.4
+      rows need the user (15.6 flagged, 0.8 marked) and about 5.4 are
+      written wrong unmarked (2.4 by rules, 3.0 by the AI), of 105.8
+      rows. Lowering the threshold to 0.6 would flag 9 but write 43 wrong.
+    - The AI's weak spots: Uit spaarpotje 2/7, Cadeautjes 5/9, Snacken
+      10/16, Ander 17/27, Dates/uitjes 25/35 (Boodschappen, Snacken and
+      Dates/uitjes mistaken for each other).
   - Holdout: 2026 is not looked at while choosing rules. Once the rules
     are in, the 2026 months already categorised by hand (January to
     21 May) score them, with an export of those months (`--years 2026`).
