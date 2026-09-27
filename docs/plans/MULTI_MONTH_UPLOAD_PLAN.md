@@ -2571,6 +2571,24 @@ measures them on months where the right answer is already known.
     full.
   - Left in step 1: `sheet_shape.py --folder` and `--summary`, and moving
     it off the retired `GOOGLE_CREDENTIALS_PATH` and `GSHEET_TAB` keys.
+- Done 2026-09-27 (me), step 1 part 3, `sheet_shape.py`, 749 tests green:
+  - Reads with the service account from `--credentials` (default
+    `src/config/google_service_account.json`) and `--tab`, no config
+    keys, and read-only scopes (`spreadsheets.readonly`,
+    `drive.readonly`).
+  - `sheets --folder ID`: the Drive tree under a folder, folders first,
+    each spreadsheet with its id and edit right, a folder in two parents
+    listed once. On `Financiën` it gives section 11's layout: 7 folders,
+    31 spreadsheets, `12/2025` in `2025` itself.
+  - `sheets --summary [names]`: locale, time zone and recalculation; the
+    Summary formulas read with `valueRenderOption=FORMULA`, rows with the
+    same formula but their own row number as one run (`E28:E45`), numbers
+    other than 0 and 1 and non-empty texts inside a formula masked; the
+    first and last label and count of the two category tables; whether
+    `L8` is filled. It never prints a rendered value. On the template and
+    `05/2026` it reproduces section 11's formula table; both now carry
+    `! Nog in te delen !` in `H35`.
+  - Tests: `tests/test_sheet_shape.py`.
 2. Docs: `AGENTS.md`, `docs/DEVELOPMENT.md`, `docs/CHANGES.md`,
    `config_settings.example.py`; `run.sh` (token check, `src/config` bind
    mount, remove the service-account check, note on `--force-rebuild`);
