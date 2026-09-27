@@ -45,16 +45,10 @@ TIMEZONE = os.environ.get('TZ', 'UTC')
 # Enable/disable Google Sheets integration
 GOOGLE_SHEETS_ENABLED = True
 
-# Service account key and single-sheet name from before the multi-month
-# upload; removed after the cutover (plan Phase 4 step 6). The inspection
-# scripts take the key file as --credentials instead.
-GOOGLE_CREDENTIALS_PATH = "src/config/google_service_account.json"
-GSHEET_NAME = "Test Automation Sheet"
-
 # Multi-month upload (docs/plans/MULTI_MONTH_UPLOAD_PLAN.md 4.10)
 # The bot runs on the user's own Google account via an OAuth token made once
-# with scripts/google_login.py. "service_account" exists only until the cutover.
-GOOGLE_AUTH_MODE = "oauth"
+# with scripts/google_login.py. The inspection scripts read with the service
+# account key instead, passed as --credentials.
 GOOGLE_OAUTH_CLIENT_PATH = "data/google/oauth_client.json"
 GOOGLE_OAUTH_TOKEN_PATH = "data/google/authorized_user.json"
 GSHEET_NAME_PATTERN = "Maandelijks Budget {label}"
@@ -170,9 +164,6 @@ __all__ = [
     "CSV_DOWNLOAD_LINK",
     "TIMEZONE",
     "GOOGLE_SHEETS_ENABLED",
-    "GOOGLE_CREDENTIALS_PATH",
-    "GSHEET_NAME",
-    "GOOGLE_AUTH_MODE",
     "GOOGLE_OAUTH_CLIENT_PATH",
     "GOOGLE_OAUTH_TOKEN_PATH",
     "GSHEET_NAME_PATTERN",

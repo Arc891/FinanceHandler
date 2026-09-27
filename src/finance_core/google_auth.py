@@ -4,14 +4,12 @@ Google credentials for the bot (plan 4.2).
 The bot runs on the user's own Google account through an OAuth token created
 once on the workstation by scripts/google_login.py. The service account is
 retired for runtime use: its Drive quota is 0, so it cannot create a month.
+Only the read-only inspection scripts still use it, with their own key path.
 
 Scopes are exactly ``spreadsheets`` and ``drive.file``. Every other ``drive.*``
 scope is restricted and would require a paid CASA security assessment, so none
 may be added without a decision from the user. tests/test_google_auth.py fails
 if one is.
-
-GOOGLE_AUTH_MODE = "service_account" keeps the old key usable during Phases
-1-3 only; it is removed in Phase 4.
 """
 
 import json
@@ -23,7 +21,6 @@ import gspread
 from google.auth.exceptions import RefreshError
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials as OAuthCredentials
-from google.oauth2.service_account import Credentials as ServiceAccountCredentials
 
 from finance_core.config_access import project_path, setting
 
@@ -101,22 +98,14 @@ def _load_oauth(path) -> OAuthCredentials:
         raise GoogleAuthError(f"unreadable Google token at {path} ({exc}); {LOGIN_HINT}") from exc
 
 
-def get_credentials(path=None, *, mode=None, service_account_path=None):
+def get_credentials(path=None):
     """
     Credentials for every Google client the bot builds.
 
-    OAuth mode loads the token, refreshes it when needed and writes it back
+    Loads the OAuth token, refreshes it when needed and writes it back
     after every refresh, because Google may rotate the refresh token. The bot
     never opens a browser: a missing or revoked token is a GoogleAuthError.
     """
-    mode = mode or setting("GOOGLE_AUTH_MODE", "oauth")
-    if mode == "service_account":
-        key = service_account_path or project_path(
-            setting("GOOGLE_CREDENTIALS_PATH", "src/config/google_service_account.json"))
-        return ServiceAccountCredentials.from_service_account_file(os.fspath(key), scopes=SCOPES)
-    if mode != "oauth":
-        raise GoogleAuthError(f"unknown GOOGLE_AUTH_MODE {mode!r}: use 'oauth' or 'service_account'")
-
     path = path or token_path()
     creds = _load_oauth(path)
     if creds.valid:

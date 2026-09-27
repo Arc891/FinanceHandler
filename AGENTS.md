@@ -194,9 +194,8 @@ All configuration lives in `src/config/config_settings.py` (copy from `config_se
 - Periods: `PERIOD_BOUNDARY_MARKERS`, `PERIOD_BOUNDARY_MIN_AMOUNT`, `PERIOD_MIN_DAYS`, `PERIOD_MAX_DAYS`, `PERIOD_STEP_DAYS`, `PERIOD_LABEL_SPLIT_DAY`.
 - AI: `AI_CONFIDENCE_THRESHOLD` (0.75; flag or not, never write or not), `AI_PER_TX_FALLBACK_LIMIT`, `AI_MAX_PARALLEL_CHUNKS`, `AI_RUN_MAX_MINUTES`, `AI_BUDGET_TRIP_ACTION` (`write_flagged`: the rest is written flagged; `stop`: later months wait for `/resume`), `SUMMARY_FLAGGED_LINES` (beyond it the flagged list is attached as a `.txt`).
 - Rules: `ACCOUNT_ROLES` (`savings`, `partner_personal`, `user_personal` IBANs), `LOCAL_RULES_PATH`.
-- Until the cutover's last step (plan Phase 4 step 6): `GOOGLE_AUTH_MODE` (`oauth`; still required by the self-check), `GSHEET_NAME`, `GOOGLE_CREDENTIALS_PATH`.
 - Bank automation and API: `BANK_*`, `ASN_*`, `AUTO_DOWNLOAD_*`, `API_*`.
-- Retired: `GSHEET_TAB`, `GSHEET_EXPENSE_START_ROW`, `GSHEET_INCOME_START_ROW`, `APPROVAL_CHANNEL_ID`, `APPROVAL_WEBHOOK_URL`, `PENDING_APPROVALS_FILE`, `SESSION_DIR`, `CLAUDE_MODEL`.
+- Retired: `GSHEET_TAB`, `GSHEET_EXPENSE_START_ROW`, `GSHEET_INCOME_START_ROW`, `APPROVAL_CHANNEL_ID`, `APPROVAL_WEBHOOK_URL`, `PENDING_APPROVALS_FILE`, `SESSION_DIR`, `CLAUDE_MODEL`, `GOOGLE_AUTH_MODE`, `GSHEET_NAME`, `GOOGLE_CREDENTIALS_PATH`.
 
 ### Google access
 

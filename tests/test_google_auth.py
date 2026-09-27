@@ -92,7 +92,7 @@ def test_check_scopes_accepts_exactly_the_two():
 
 def test_missing_token_names_the_login_script(tmp_path):
     with pytest.raises(GoogleAuthError, match="google_login.py"):
-        get_credentials(tmp_path / "authorized_user.json", mode="oauth")
+        get_credentials(tmp_path / "authorized_user.json")
 
 
 def test_refresh_error_is_a_google_auth_error_naming_the_login_script(tmp_path, monkeypatch):
@@ -103,12 +103,12 @@ def test_refresh_error_is_a_google_auth_error_naming_the_login_script(tmp_path, 
 
     monkeypatch.setattr(google_auth.OAuthCredentials, "refresh", boom)
     with pytest.raises(GoogleAuthError, match="google_login.py"):
-        get_credentials(path, mode="oauth")
+        get_credentials(path)
 
 
 def test_refreshed_credentials_are_written_back(tmp_path, refresh_ok):
     path = write_token(tmp_path / "authorized_user.json")
-    creds = get_credentials(path, mode="oauth")
+    creds = get_credentials(path)
     assert creds.token == "at-1"
     saved = json.loads(path.read_text())
     assert saved["token"] == "at-1"
@@ -121,7 +121,7 @@ def test_refreshed_credentials_are_written_back(tmp_path, refresh_ok):
 def test_valid_token_is_not_refreshed_or_rewritten(tmp_path, refresh_ok):
     path = write_token(tmp_path / "authorized_user.json", expired=False)
     before = path.read_text()
-    get_credentials(path, mode="oauth")
+    get_credentials(path)
     assert refresh_ok == []
     assert path.read_text() == before
 
@@ -129,35 +129,26 @@ def test_valid_token_is_not_refreshed_or_rewritten(tmp_path, refresh_ok):
 def test_token_missing_a_scope_is_refused_on_load(tmp_path, refresh_ok):
     path = write_token(tmp_path / "authorized_user.json", scopes=[SPREADSHEETS_SCOPE])
     with pytest.raises(GoogleAuthError, match="drive.file"):
-        get_credentials(path, mode="oauth")
+        get_credentials(path)
     assert refresh_ok == []
 
 
 def test_token_without_refresh_token_is_refused(tmp_path, refresh_ok):
     path = write_token(tmp_path / "authorized_user.json", refresh_token=None)
     with pytest.raises(GoogleAuthError, match="google_login.py"):
-        get_credentials(path, mode="oauth")
+        get_credentials(path)
 
 
-def test_unknown_mode_is_refused(tmp_path):
-    with pytest.raises(GoogleAuthError, match="GOOGLE_AUTH_MODE"):
-        get_credentials(tmp_path / "x.json", mode="apikey")
-
-
-def test_service_account_mode_still_builds_a_client(tmp_path, monkeypatch):
-    built = {}
-
-    def fake_from_file(path, scopes):
-        built["path"], built["scopes"] = path, scopes
-        return "sa-creds"
-
-    monkeypatch.setattr(google_auth.ServiceAccountCredentials, "from_service_account_file",
-                        staticmethod(fake_from_file))
-    key = tmp_path / "sa.json"
-    key.write_text("{}")
-    assert google_auth.get_credentials(mode="service_account", service_account_path=key) == "sa-creds"
-    assert built["path"] == str(key)
-    assert list(built["scopes"]) == list(SCOPES)
+def test_credentials_are_oauth_only(tmp_path, refresh_ok, monkeypatch):
+    # Phase 4 step 6: the service-account mode is gone; a stale
+    # GOOGLE_AUTH_MODE in a config changes nothing
+    import inspect
+    assert list(inspect.signature(get_credentials).parameters) == ["path"]
+    assert not hasattr(google_auth, "ServiceAccountCredentials")
+    monkeypatch.setattr(google_auth, "setting", lambda name, default=None:
+                        "service_account" if name == "GOOGLE_AUTH_MODE" else default)
+    path = write_token(tmp_path / "authorized_user.json", expired=False)
+    assert get_credentials(path).refresh_token
 
 
 def test_gspread_client_uses_the_shared_credentials(monkeypatch):

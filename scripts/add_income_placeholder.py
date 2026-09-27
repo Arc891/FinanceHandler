@@ -19,8 +19,8 @@ Usage:
     venv/bin/python scripts/add_income_placeholder.py --apply         # write H35
     venv/bin/python scripts/add_income_placeholder.py --apply --only template
 
-Uses the service account in GOOGLE_CREDENTIALS_PATH, which has edit access to
-the Financiën folder. Exit status is 0 only if no sheet was refused or failed.
+Uses the service account key src/config/google_service_account.json, which has
+edit access to the Financiën folder. Exit status is 0 only if no sheet was refused or failed.
 """
 
 import argparse
@@ -98,10 +98,9 @@ class GspreadSummary:
 def service_account_opener():
     import gspread
     from google.oauth2.service_account import Credentials
-    from config.config_settings import GOOGLE_CREDENTIALS_PATH
 
     creds = Credentials.from_service_account_file(
-        os.path.join(PROJECT_ROOT, GOOGLE_CREDENTIALS_PATH),
+        os.path.join(PROJECT_ROOT, "src", "config", "google_service_account.json"),
         scopes=["https://www.googleapis.com/auth/spreadsheets"])
     gc = gspread.authorize(creds)
 

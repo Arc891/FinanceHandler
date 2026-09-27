@@ -1,10 +1,10 @@
 """
-Tests for Phase 4 step 2: the example config and run.sh after the cutover.
+Tests for Phase 4 steps 2 and 6: the example config and run.sh after the cutover.
 
-The example config drops the keys the multi-month upload retired (plan
-4.10) except the three step 6 removes once the Pi runs on OAuth
+The example config drops every key the multi-month upload retired (plan
+4.10), including the three step 6 removes once the Pi runs on OAuth
 (GOOGLE_AUTH_MODE, GSHEET_NAME, GOOGLE_CREDENTIALS_PATH), and exports only
-what it defines. run.sh refuses to deploy without the OAuth token, no longer
+what it defines. The self-check requires none of them and no code reads them. run.sh refuses to deploy without the OAuth token, no longer
 looks for the service account key, mounts src/config read-only so a setting
 change needs a restart rather than a rebuild, and warns before
 --force-rebuild prunes what could be the rollback image.
@@ -16,8 +16,8 @@ import re
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RETIRED = ("GSHEET_TAB", "GSHEET_EXPENSE_START_ROW", "GSHEET_INCOME_START_ROW", "APPROVAL_CHANNEL_ID",
-           "APPROVAL_WEBHOOK_URL", "PENDING_APPROVALS_FILE", "SESSION_DIR", "CLAUDE_MODEL")
-UNTIL_STEP_6 = ("GOOGLE_AUTH_MODE", "GSHEET_NAME", "GOOGLE_CREDENTIALS_PATH")
+           "APPROVAL_WEBHOOK_URL", "PENDING_APPROVALS_FILE", "SESSION_DIR", "CLAUDE_MODEL",
+           "GOOGLE_AUTH_MODE", "GSHEET_NAME", "GOOGLE_CREDENTIALS_PATH")
 
 
 def example():
@@ -36,7 +36,28 @@ def run_sh():
 def test_the_example_config_no_longer_holds_the_retired_keys():
     mod = example()
     assert [k for k in RETIRED if hasattr(mod, k)] == []
-    assert all(hasattr(mod, k) for k in UNTIL_STEP_6)
+
+
+def test_the_self_check_requires_no_retired_key():
+    from config_check import REQUIRED_SETTINGS
+    assert not set(RETIRED) & set(REQUIRED_SETTINGS)
+
+
+def test_no_code_reads_a_retired_key():
+    # src/config/ is skipped: it holds the private config and the example
+    # (checked above); the tests name the keys to assert they are gone
+    pattern = re.compile(r"\b(%s)\b" % "|".join(RETIRED))
+    hits = []
+    for top in ("src", "scripts"):
+        for dirpath, dirnames, filenames in os.walk(os.path.join(ROOT, top)):
+            dirnames[:] = [d for d in dirnames if d not in ("config", "__pycache__")]
+            for name in filenames:
+                if name.endswith((".py", ".sh")):
+                    path = os.path.join(dirpath, name)
+                    with open(path, encoding="utf-8") as f:
+                        if pattern.search(f.read()):
+                            hits.append(os.path.relpath(path, ROOT))
+    assert hits == []
 
 
 def test_the_example_exports_only_what_it_defines():

@@ -625,8 +625,7 @@ def load_exports(paths):
 def service_account_client(path_arg):
     import gspread
     from google.oauth2.service_account import Credentials
-    from finance_core.config_access import setting
-    path = path_arg or setting("GOOGLE_CREDENTIALS_PATH", "src/config/google_service_account.json")
+    path = path_arg or "src/config/google_service_account.json"
     candidates = [path] if os.path.isabs(path) else [os.path.join(PROJECT_ROOT, path),
                                                      os.path.join("/app", path)]
     found = next((p for p in candidates if os.path.exists(p)), None)
@@ -723,7 +722,7 @@ def main(argv=None) -> int:
     parser.add_argument("--parallel", type=int, default=None,
                         help="chunks in flight at once; default AI_MAX_PARALLEL_CHUNKS")
     parser.add_argument("--tab", default="Transactions")
-    parser.add_argument("--credentials", help="service account key; default from config")
+    parser.add_argument("--credentials", help="service account key (default: src/config/google_service_account.json)")
     parser.add_argument("--src", help="a source tree to import instead of the image's")
     parser.add_argument("--dry-run", action="store_true",
                         help="read and match only; send nothing to the AI")

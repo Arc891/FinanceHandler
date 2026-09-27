@@ -2675,6 +2675,17 @@ measures them on months where the right answer is already known.
     user against ~16 in the 2026 holdout. Not investigated (no reading of
     real rows); the user's review of the flagged list decides whether rules
     follow.
+- Done 2026-09-27 (me), step 6 in the repo, 756 tests green:
+  `GOOGLE_AUTH_MODE` out of `REQUIRED_SETTINGS`; `get_credentials` is
+  OAuth-only; `GSHEET_NAME`, `GOOGLE_CREDENTIALS_PATH` and
+  `GOOGLE_AUTH_MODE` out of the example; the unused `GoogleSheetsExporter`
+  and `sort_google_sheet_transactions` deleted from `google_sheets.py`;
+  `add_income_placeholder.py` and `eval_categoriser.py` default to the key
+  file path instead of the retired key. Tests: `tests/test_deployment.py`
+  (no code in `src/` or `scripts/` names a retired key),
+  `tests/test_google_auth.py`. Left: the three keys and the key file out of
+  the Pi's config, a redeploy, `/docs-update`.
+
 ## 7. Risks and mitigations
 
 | Risk | Likelihood | Mitigation |
