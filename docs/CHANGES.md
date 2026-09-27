@@ -2,6 +2,45 @@
 
 ## Recent Changes
 
+### Multi-Month Upload (2026-09-27)
+
+Design and work log: `docs/plans/MULTI_MONTH_UPLOAD_PLAN.md`.
+
+**What users notice**:
+- One `/upload` takes up to five ASN exports and may cover several financial months. The rows are split on DUO / Anamata salary income: a month starts on that income's date, and a boundary on the 15th or later names the next calendar month.
+- Each financial month is its own spreadsheet, `Maandelijks Budget MM/YYYY`. The next month is created automatically from the template and moved into the `Financiën` folder, with the previous month's closing balance as its starting balance (`Summary!L8`) when that month is known; otherwise the summary asks you to fill it in. The bot only creates the month after the newest one it knows.
+- No review buttons any more: every row is written at upload time. A row the AI was unsure about (below `AI_CONFIDENCE_THRESHOLD`, 0.75) or could not answer gets the category `! Nog in te delen !`; a row a rule marks for checking keeps its category and gets `? ` before its description. The sheet is where these are checked and fixed.
+- Progress lines and a summary go to your private `Approvals-<name>` thread in the reminder channel: months written, sheets created, rows skipped as already uploaded, flagged and marked counts, and per flagged row the AI guess that was not used (beyond 40 rows as an attached `.txt`).
+- Uploading an overlapping export does not write rows twice: rows already written are skipped and counted.
+- An interrupted run keeps its state: `/status` shows what is not written, `/resume` finishes it, `/cancel` abandons it.
+- `/months list` shows which sheet holds which month; `/months register` adds a sheet the bot did not create.
+- `/review`, `/cached`, `/pending` and `/resetsheet` are removed, and with them the pending approval queue, cached transactions and per-user sessions. Every command is limited to the household (`MENTION_USER_IDS`).
+- `/sort` takes an optional month; by default it sorts every sheet the last run touched.
+
+**How it works**:
+- Rows are appended below what is there; a sheet is never cleared and rewritten. An upload ledger (`data/upload_ledger.json`) records every row before it is written (dedup) and after (the audit that `undo_upload.py` uses).
+- Categorisation: conditional rules and the rule tables in `constants.py`, then the household's own rules in `src/config/local_rules.tsv` (git-ignored), then Claude (Sonnet, via the Claude Code CLI) in batches, several chunks in parallel. Transfers from the savings account that match a purchase are passed to the AI as a hint, never as a category.
+- Google access is the user's own account through OAuth (scopes `spreadsheets` and `drive.file` only). The service account is kept only for read-only inspection scripts.
+
+**Configuration**:
+- Added: `GOOGLE_OAUTH_CLIENT_PATH`, `GOOGLE_OAUTH_TOKEN_PATH`, `GSHEET_NAME_PATTERN`, `GSHEET_TEMPLATE_ID`, `GSHEET_FOLDER_ID`, `GSHEET_AUTO_CREATE`, `GSHEET_CREATE_NONADJACENT`, `GSHEET_DATA_START_ROW`, `SHEET_INDEX_PATH`, `UPLOAD_LEDGER_PATH`, `PERIOD_STATE_PATH`, `RUNS_DIR`, `PERIOD_BOUNDARY_MARKERS`, `PERIOD_BOUNDARY_MIN_AMOUNT`, `PERIOD_MIN_DAYS`, `PERIOD_MAX_DAYS`, `PERIOD_STEP_DAYS`, `PERIOD_LABEL_SPLIT_DAY`, `AI_CONFIDENCE_THRESHOLD`, `AI_PER_TX_FALLBACK_LIMIT`, `AI_MAX_PARALLEL_CHUNKS`, `AI_RUN_MAX_MINUTES`, `AI_BUDGET_TRIP_ACTION`, `SUMMARY_FLAGGED_LINES`, `ACCOUNT_ROLES`, `LOCAL_RULES_PATH`.
+- Retired: `GSHEET_TAB`, `GSHEET_EXPENSE_START_ROW`, `GSHEET_INCOME_START_ROW`, `APPROVAL_CHANNEL_ID`, `APPROVAL_WEBHOOK_URL`, `PENDING_APPROVALS_FILE`, `SESSION_DIR`, `CLAUDE_MODEL`.
+- Transitional, removed at the last cutover step: `GOOGLE_AUTH_MODE` (new, `oauth`), `GSHEET_NAME`, `GOOGLE_CREDENTIALS_PATH`.
+- The bot checks its config at startup and stops with one line naming any missing key (`src/config_check.py`).
+
+**New scripts**:
+- `google_login.py` (OAuth token, once), `register_sheets.py` (the month index), `seed_state.py` (period anchor and ledger from the sheets), `undo_upload.py` (reverse one run).
+- `retry_failed_transactions.py` rewritten for the new layer; it takes no user id any more and skips rows a still-open run owes.
+- `eval_categoriser.py`, `rule_coverage.py`, `apply_rule_draft.py` (score the categoriser against hand-checked months and turn rule decisions into the local rules file; counts only), `sheet_shape.py` (`--summary`, `--folder`), `make_fixture.py`, `sandbox_check.py`, `time_ai_chunk.py`, `add_income_placeholder.py` (one-off).
+- Removed: `recategorize_pending.py`.
+
+**Deployment**:
+- `run.sh` refuses to deploy without `data/google/authorized_user.json` and no longer checks for the service-account key.
+- `src/config` is bind-mounted read-only: a config or local-rules change needs a restart, not a rebuild.
+- `--force-rebuild` prunes Docker and can remove the image now running; `docker tag` it first to keep a rollback. `data/` is a bind mount and survives.
+- `data/` must be in the backup set: `data/sheet_index.json` is the only record of which sheet holds which month, and the OAuth token lives in `data/google/`.
+- The template and the 2026 months carry `! Nog in te delen !` in the income table (`Summary!H35`), so flagged income counts in the totals.
+
 ### Discord Approval UI - Session 3 (2025-12-17)
 
 **Proactive Discord Approval Flow**:

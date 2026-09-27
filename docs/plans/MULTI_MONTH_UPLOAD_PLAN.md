@@ -2516,6 +2516,12 @@ measures them on months where the right answer is already known.
     - The AI's weak spots: Uit spaarpotje 2/7, Cadeautjes 5/9, Snacken
       10/16, Ander 17/27, Dates/uitjes 25/35 (Boodschappen, Snacken and
       Dates/uitjes mistaken for each other).
+    - Caveat (user, 2026-09-27): the 2026 sheets were mostly the bot's own
+      AI answers with a light review, so the holdout partly measures the
+      AI agreeing with its earlier answers; the numbers are likely
+      optimistic, the AI share most. The first live months, fully
+      reviewed, are the real test. For the same reason no rule is changed
+      on the 2026 misses (N22 line 20 stays as it is).
   - Holdout: 2026 is not looked at while choosing rules. Once the rules
     are in, the 2026 months already categorised by hand (January to
     21 May) score them, with an export of those months (`--years 2026`).
@@ -2593,6 +2599,27 @@ measures them on months where the right answer is already known.
    `config_settings.example.py`; `run.sh` (token check, `src/config` bind
    mount, remove the service-account check, note on `--force-rebuild`);
    `Dockerfile` unchanged.
+
+- Done 2026-09-27 (me), step 2, 755 tests green:
+  - `config_settings.example.py`: `GSHEET_TAB`, both `*_START_ROW` keys,
+    `APPROVAL_CHANNEL_ID`, `APPROVAL_WEBHOOK_URL`, `PENDING_APPROVALS_FILE`,
+    `SESSION_DIR` and `CLAUDE_MODEL` removed; `GOOGLE_AUTH_MODE`,
+    `GSHEET_NAME` and `GOOGLE_CREDENTIALS_PATH` stay until step 6; `__all__`
+    lists only defined keys.
+  - `run.sh`: refuses without `data/google/authorized_user.json`, no
+    service-account check, `src/config` bind-mounted read-only, and
+    `--force-rebuild` says to tag the running image first.
+  - `docs/DEVELOPMENT.md`, `docs/CHANGES.md` and `AGENTS.md` describe the
+    multi-month flow. `AGENTS.md` and `CLAUDE.md` are git-ignored
+    (`.gitignore` `/[A-Z_]*.md`), so the `AGENTS.md` update is local only.
+  - CI's import check named the removed `process_csv_file`; it now imports
+    `Pipeline`. Tests: `tests/test_deployment.py`.
+  - Found for step 3 and 6: the image holds `src/` only, so `seed_state.py`
+    needs `scripts/` mounted (step 3 corrected);
+    `config_check.REQUIRED_SETTINGS` still lists `GOOGLE_AUTH_MODE` and
+    `add_income_placeholder.py` imports `GOOGLE_CREDENTIALS_PATH`, so step 6
+    changes both; `google_sheets.py` still carries the unused single-sheet
+    exporter; `README.md` still describes the old review flow.
 3. On the Pi, before the rebuild: **tag and keep the running image**
    (`docker tag <current> finance-bot:pre-multimonth`) so `--force-rebuild`'s
    `docker system prune -f --volumes` at `run.sh:131` cannot destroy the
@@ -2603,8 +2630,11 @@ measures them on months where the right answer is already known.
    no `CACHED` rows (`sheet_shape.py` category counts).
    `seed_state.py` needs the new modules and the OAuth token and the Pi has no
    host venv for the bot, so it runs **inside the newly built image** —
-   `docker run --rm -v <data>:/app/data <new-image> python scripts/seed_state.py`
-   — after the build in step 4 but before the service is switched over. Its
+   `docker run --rm -it -v "$(pwd)/data:/app/data" -v "$(pwd)/scripts:/app/scripts:ro"
+   -v "$(pwd)/src/config:/app/src/config:ro" <new-image> python scripts/seed_state.py`
+   (the image holds `src/` only, so `scripts/` is mounted; `-it` because it
+   asks for `yes`) — after the build in step 4 but before the service is
+   switched over. Its
    printed anchor and `history` must be confirmed by the user.
 4. Build, run `seed_state.py` per step 3, then start; the self-check must
    pass; `/months` must list every **2026** month (2024 and 2025 live in
