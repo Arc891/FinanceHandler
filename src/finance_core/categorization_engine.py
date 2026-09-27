@@ -226,7 +226,8 @@ class CategorizationEngine:
         self, transactions: list[Dict[str, Any]],
         deadline: Optional[float] = None,
         fallback_limit: Optional[int] = None,
-        max_parallel: Optional[int] = None
+        max_parallel: Optional[int] = None,
+        context: Optional[str] = None
     ) -> list[CategorizationResult]:
         """
         Categorize a batch: regex first on all, then batch AI for unmatched.
@@ -318,7 +319,8 @@ class CategorizationEngine:
                     income_categories=income_categories,
                     example_rules=example_rules,
                     deadline=deadline,
-                    max_parallel=max_parallel
+                    max_parallel=max_parallel,
+                    user_context=context
                 )
 
                 # Map AI results back and handle fallback for failures

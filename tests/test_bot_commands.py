@@ -123,8 +123,9 @@ class Pipeline:
         return self.report
 
     async def process_upload(self, upload_id, files, *, force=False,
-                             progress=None):
+                             progress=None, note=None):
         self.calls.append(("upload", upload_id, list(files), force))
+        self.note = note
         return await self._run(progress)
 
     async def resume(self, upload_id=None, *, progress=None):
@@ -221,6 +222,13 @@ async def test_no_thread_refuses_before_saving(env):
     await call(env.cog.upload, env.cog, it, att)
     assert "thread" in it.replies().texts().lower()
     assert att.saved_to is None and env.pipeline.calls == []
+
+
+async def test_the_upload_note_reaches_the_pipeline(env):
+    it = Interaction()
+    await call(env.cog.upload, env.cog, it, Attachment("a.csv", b"1"),
+               note="vakantie Italië 10-07 t/m 24-07")
+    assert env.pipeline.note == "vakantie Italië 10-07 t/m 24-07"
 
 
 async def test_attachments_are_saved_in_order_under_a_fresh_upload_folder(env):
@@ -473,10 +481,11 @@ def test_only_the_new_commands_exist(env):
                      "months", "months list", "months register"}
 
 
-def test_upload_takes_five_attachments_and_force(env):
-    params = [p.name for p in env.cog.upload.parameters]
-    assert params == ["attachment", "attachment2", "attachment3",
-                      "attachment4", "attachment5", "force"]
+def test_upload_takes_five_attachments_force_and_an_optional_note(env):
+    params = {p.name: p for p in env.cog.upload.parameters}
+    assert list(params) == ["attachment", "attachment2", "attachment3",
+                            "attachment4", "attachment5", "force", "note"]
+    assert not params["note"].required and params["note"].max_value == 300
 
 
 # ── config self-check (plan 4.10) ───────────────────────────────────────────

@@ -323,7 +323,8 @@ Respond ONLY with the JSON object, nothing else. Remember: description must be i
         example_rules: Dict[str, Tuple[str, str]],
         deadline: Optional[float] = None,
         max_parallel: int = 3,
-        chunk_timeout: float = CHUNK_TIMEOUT
+        chunk_timeout: float = CHUNK_TIMEOUT,
+        user_context: Optional[str] = None
     ) -> list:
         """
         Categorize a batch of transactions, one AI call per chunk of 40.
@@ -334,6 +335,9 @@ Respond ONLY with the JSON object, nothing else. Remember: description must be i
         A chunk unfinished at deadline (time.monotonic() seconds) is
         cancelled, and so is one still running chunk_timeout seconds after
         it started (time spent queued for a slot does not count).
+
+        user_context is the household's note for this upload, shown to the
+        AI in every chunk as context.
 
         Returns list of (category, description, confidence, relationship_info) tuples.
         Returns None at positions where categorization failed or timed out.
@@ -374,7 +378,7 @@ Respond ONLY with the JSON object, nothing else. Remember: description must be i
                     await asyncio.wait_for(self._categorize_chunk(
                         *chunk, offset, all_results, anon_precategorized,
                         precategorized_transactions, expense_categories,
-                        income_categories, example_rules, name_mapping),
+                        income_categories, example_rules, name_mapping, user_context),
                         timeout=chunk_timeout)
                 except asyncio.TimeoutError:
                     logger.warning(
@@ -400,7 +404,7 @@ Respond ONLY with the JSON object, nothing else. Remember: description must be i
     async def _categorize_chunk(
         self, chunk_anon, chunk_orig, chunk_ids, offset, all_results,
         anon_precategorized, precategorized_transactions,
-        expense_categories, income_categories, example_rules, name_mapping
+        expense_categories, income_categories, example_rules, name_mapping, user_context=None
     ):
         """Categorize one chunk and write its entries into all_results.
 
@@ -409,7 +413,7 @@ Respond ONLY with the JSON object, nothing else. Remember: description must be i
         prompt = self._build_batch_prompt(
             chunk_anon, anon_precategorized, precategorized_transactions,
             expense_categories, income_categories, example_rules, chunk_ids,
-            orig_to_categorize=chunk_orig
+            orig_to_categorize=chunk_orig, user_context=user_context
         )
 
         try:
@@ -524,7 +528,7 @@ Respond ONLY with the JSON object, nothing else. Remember: description must be i
     def _build_batch_prompt(
         self, anon_to_categorize, anon_precategorized, orig_precategorized,
         expense_categories, income_categories, example_rules, t_ids,
-        orig_to_categorize=None
+        orig_to_categorize=None, user_context=None
     ) -> str:
         """Build the batch categorization prompt.
 
@@ -575,6 +579,10 @@ Respond ONLY with the JSON object, nothing else. Remember: description must be i
                 f"| {anon_tx.get('remittance_information', '')[:80]} | {hint} |"
             )
         to_cat_text = "\n".join(to_cat_rows)
+        context = (user_context or "").strip()
+        context_text = (
+            "\n## Context from the household for this upload (circumstances, not rules; "
+            "use it where a row fits it):\n" + context + "\n") if context else ""
 
         return f"""You are a transaction categorization assistant for Dutch household budgets.
 
@@ -584,7 +592,7 @@ Respond ONLY with the JSON object, nothing else. Remember: description must be i
 
 ### Income:
 {income_list}
-
+{context_text}
 ## Example Rules (reference - shows how similar transactions are categorized):
 {example_text}
 

@@ -131,14 +131,16 @@ class FinanceBot(commands.Cog):
         attachment3="Another export (optional)",
         attachment4="Another export (optional)",
         attachment5="Another export (optional)",
-        force="Write even when the split looks suspicious (4.3)")
+        force="Write even when the split looks suspicious (4.3)",
+        note="Context for the AI, e.g. 'vakantie Italië 10-07 t/m 24-07'; sent as written")
     async def upload(self, interaction: discord.Interaction,
                      attachment: discord.Attachment,
                      attachment2: Optional[discord.Attachment] = None,
                      attachment3: Optional[discord.Attachment] = None,
                      attachment4: Optional[discord.Attachment] = None,
                      attachment5: Optional[discord.Attachment] = None,
-                     force: bool = False):
+                     force: bool = False,
+                     note: Optional[app_commands.Range[str, 1, 300]] = None):
         attachments = [a for a in (attachment, attachment2, attachment3,
                                    attachment4, attachment5) if a is not None]
         if not await self._allowed(interaction):
@@ -177,7 +179,7 @@ class FinanceBot(commands.Cog):
         self._spawn(self._run(
             interaction, thread,
             lambda progress: pipeline.process_upload(
-                upload_id, files, force=force, progress=progress),
+                upload_id, files, force=force, progress=progress, note=note),
             refused_cleanup=folder))
 
     @app_commands.command(name="resume",

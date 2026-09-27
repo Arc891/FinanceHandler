@@ -170,6 +170,8 @@ def render(run: dict, *, flagged_cap: int) -> RunReport:
     notes = run.get("notes") or {}
     periods = run.get("periods") or []
     lines = [f"Upload {run['upload_id']}"]
+    if run.get("note"):
+        lines.append(f"Note for the AI: {run['note']}")
     if "loaded" in notes:
         lines.append(f"{_plural(notes['loaded'], 'row')} read from {_plural(len(run['files']), 'file')}; "
                      f"{notes.get('accepted', 0)} new.")
@@ -274,13 +276,18 @@ class Pipeline:
 
     # ── commands ──────────────────────────────────────────────────────────
     async def process_upload(self, upload_id: str, files, *, force: bool = False,
-                             progress: Progress = None) -> RunReport:
-        """/upload: ``files`` are the saved attachments, in attachment order."""
+                             progress: Progress = None, note: Optional[str] = None) -> RunReport:
+        """
+        /upload: ``files`` are the saved attachments, in attachment order.
+        ``note`` is the household's context for the AI; it is kept in the run
+        state so /resume uses it too, and never logged.
+        """
         self._refuse_if_appending()
         _take_guard(upload_id)
         try:
             folders = {os.path.dirname(os.path.abspath(f)) for f in files}
             run = self.store.create(upload_id, files=[os.fspath(f) for f in files], force=force,
+                                    note=(note or "").strip() or None,
                                     upload_dir=folders.pop() if len(folders) == 1 else None,
                                     anchor_before=read_state(self.config.period_state_path))
             logger.info("Run %s started with %d file(s)", upload_id, len(files))
@@ -520,7 +527,7 @@ class Pipeline:
     async def _categorise(self, run: dict, p: dict, deadline: float) -> bool:
         txs = sorted(_txs(p), key=lambda t: parse_date(t["booking_date"]))
         try:
-            results = await self.engine.batch_categorize(txs, deadline=deadline)
+            results = await self.engine.batch_categorize(txs, deadline=deadline, context=run.get("note"))
             if len(results) != len(txs):
                 raise RuntimeError(f"{len(results)} results for {len(txs)} rows")
         except Exception as exc:

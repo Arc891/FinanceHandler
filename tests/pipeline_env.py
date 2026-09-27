@@ -52,11 +52,13 @@ class FakeEngine:
     def __init__(self, clock):
         self.clock = clock
         self.calls = []            # [(period_label, n_rows, deadline)]
+        self.contexts = []         # the upload note each call was given
         self.before_call = None
         self.spend = {}            # label -> seconds this call takes on the clock
 
-    async def batch_categorize(self, transactions, deadline=None, **kwargs):
+    async def batch_categorize(self, transactions, deadline=None, context=None, **kwargs):
         label = transactions[0].get("period_label") if transactions else None
+        self.contexts.append(context)
         self.calls.append((label, len(transactions), deadline))
         if self.before_call:
             self.before_call(label)
@@ -174,10 +176,10 @@ class Env:
         paths = [write_csv(folder / f"export{i + 1}.csv", rows) for i, rows in enumerate(files)]
         return upload_id, paths
 
-    async def upload(self, *files, force=False, pipeline=None, progress=None):
+    async def upload(self, *files, force=False, pipeline=None, progress=None, **kwargs):
         upload_id, paths = self.save_upload(*files)
         report = await (pipeline or self.pipeline()).process_upload(upload_id, paths, force=force,
-                                                                    progress=progress)
+                                                                    progress=progress, **kwargs)
         return upload_id, report
 
     # ── inspection ──────────────────────────────────────────────────────────

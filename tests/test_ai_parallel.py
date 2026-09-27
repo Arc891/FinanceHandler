@@ -278,7 +278,7 @@ async def test_engine_passes_deadline_and_parallelism(monkeypatch):
     deadline = time.monotonic() + 60
     await engine_with(ai).batch_categorize(unmatched_rows(2),
                                            deadline=deadline)
-    assert ai.batch_kwargs == {"deadline": deadline, "max_parallel": 2}
+    assert ai.batch_kwargs == {"deadline": deadline, "max_parallel": 2, "user_context": None}
 
 
 async def test_c_id_annotates_the_regex_row_it_names():

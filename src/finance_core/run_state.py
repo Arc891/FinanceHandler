@@ -82,12 +82,12 @@ class RunStore:
         return os.path.join(self.directory, f"{upload_id}.json")
 
     def create(self, upload_id: str, *, files, force: bool, upload_dir: Optional[str],
-               anchor_before) -> dict:
+               anchor_before, note: Optional[str] = None) -> dict:
         if os.path.exists(self.path(upload_id)):
             raise ValueError(f"run {upload_id} already exists")
         run = {
             "upload_id": upload_id, "files": list(files), "upload_dir": upload_dir,
-            "force": bool(force), "started_at": _now(), "anchor_before": anchor_before,
+            "force": bool(force), "note": note or None, "started_at": _now(), "anchor_before": anchor_before,
             "anchor_after": None, "anchor_saved": False, "split_done": False,
             "closed": None, "closed_at": None, "stopped": None, "notes": {}, "periods": [],
         }
