@@ -2647,6 +2647,34 @@ measures them on months where the right answer is already known.
    homelab docs (Finance Bot section: `data/` in the backup set, the review
    UI is gone, follow-up is the `! Nog in te delen !` filter).
 
+- Done 2026-09-27 (me and the user), steps 3-5, the cutover:
+  - The Pi has no GitHub key, so the branch was pushed to its checkout over
+    ssh. Legacy state was empty (`pending_approvals.json`,
+    `failed_uploads.json`; one session file, the test id `999999999`), and
+    01-05/2026 hold no `CACHED` rows.
+  - The Pi config was backed up as `config_settings.py.pre-multimonth` and
+    the 4.10 block appended, with `ACCOUNT_ROLES` generated from the private
+    roles file (one account per role, IBANs never shown) and
+    `LOCAL_RULES_PATH`; token, client and index copied into `data/` (0600,
+    `pi`); `local_rules.tsv` into `src/config/` by the user.
+  - Running image tagged `finance-bot:pre-multimonth`. `run.sh` builds and
+    starts in one go, so the image was first built by hand
+    (`docker build --network=host -t finance-bot:multimonth .`; the bridge
+    has no egress) to run `seed_state.py` before the switch. Container user
+    uid 1000. Seed: anchor 24-04-2026 -> 05/2026, history back to
+    24-12-2025 -> 01/2026, nothing marked; the index also held an empty
+    `06/2026` (L8 filled), skipped. `./run.sh` deployed 1.5.7: self-check
+    passed, 6 commands synced, AI on; `/months list` 01-06/2026.
+  - Backlog upload `20260927-195110-e2ca`, one export from 22-05-2026:
+    483 rows, 483 new, boundaries 22-05, 24-06, 24-07, 24-08, 24-09. No
+    `05/2026` remainder: 22-05 (a Friday; the 24th was a Sunday) is itself
+    the boundary, and `05/2026` ends on 21-05, so the months join without
+    gap or overlap. `06/2026` written into the existing sheet; 07, 08, 09,
+    10/2026 created. Flagged / marked: 31/12, 25/1, 22/1, 23/0 for the full
+    months (10/2026: 1/1 on 17 rows), about 29 rows a month that need the
+    user against ~16 in the 2026 holdout. Not investigated (no reading of
+    real rows); the user's review of the flagged list decides whether rules
+    follow.
 ## 7. Risks and mitigations
 
 | Risk | Likelihood | Mitigation |
