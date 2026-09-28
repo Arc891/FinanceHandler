@@ -2,7 +2,7 @@
 
 ## Recent Changes
 
-### Multi-Month Upload (2026-09-27)
+### Multi-Month Upload (2026-09-27; release follow-up 2026-09-28)
 
 Design and work log: `docs/plans/MULTI_MONTH_UPLOAD_PLAN.md`.
 
@@ -16,11 +16,14 @@ Design and work log: `docs/plans/MULTI_MONTH_UPLOAD_PLAN.md`.
 - `/months list` shows which sheet holds which month; `/months register` adds a sheet the bot did not create.
 - `/review`, `/cached`, `/pending` and `/resetsheet` are removed, and with them the pending approval queue, cached transactions and per-user sessions. Every command is limited to the household (`MENTION_USER_IDS`).
 - `/sort` takes an optional month; by default it sorts every sheet the last run touched.
+- `/upload` accepts an optional note as AI context for that upload and any resume; it does not force a category.
+- New rows carry a note on the description cell with bank details. A flagged row includes the unused AI guess when available. Sorting and undo keep notes aligned with rows.
 
 **How it works**:
 - Rows are appended below what is there; a sheet is never cleared and rewritten. An upload ledger (`data/upload_ledger.json`) records every row before it is written (dedup) and after (the audit that `undo_upload.py` uses).
 - Categorisation: conditional rules and the rule tables in `constants.py`, then the household's own rules in `src/config/local_rules.tsv` (git-ignored), then Claude (Sonnet, via the Claude Code CLI) in batches, several chunks in parallel. Transfers from the savings account that match a purchase are passed to the AI as a hint, never as a category.
 - Google access is the user's own account through OAuth (scopes `spreadsheets` and `drive.file` only). The service account is kept only for read-only inspection scripts.
+- Created months rebind the Transactions dropdowns after both tabs exist and retain the first data row's date and currency formats. The synthetic live sandbox passed creation, round trips, sorting and undo on 2026-09-28. The owner approved its dropdowns and notes; both synthetic sandbox sheets were then trashed.
 
 **Configuration**:
 - Added: `GOOGLE_OAUTH_CLIENT_PATH`, `GOOGLE_OAUTH_TOKEN_PATH`, `GSHEET_NAME_PATTERN`, `GSHEET_TEMPLATE_ID`, `GSHEET_FOLDER_ID`, `GSHEET_AUTO_CREATE`, `GSHEET_CREATE_NONADJACENT`, `GSHEET_DATA_START_ROW`, `SHEET_INDEX_PATH`, `UPLOAD_LEDGER_PATH`, `PERIOD_STATE_PATH`, `RUNS_DIR`, `PERIOD_BOUNDARY_MARKERS`, `PERIOD_BOUNDARY_MIN_AMOUNT`, `PERIOD_MIN_DAYS`, `PERIOD_MAX_DAYS`, `PERIOD_STEP_DAYS`, `PERIOD_LABEL_SPLIT_DAY`, `AI_CONFIDENCE_THRESHOLD`, `AI_PER_TX_FALLBACK_LIMIT`, `AI_MAX_PARALLEL_CHUNKS`, `AI_RUN_MAX_MINUTES`, `AI_BUDGET_TRIP_ACTION`, `SUMMARY_FLAGGED_LINES`, `ACCOUNT_ROLES`, `LOCAL_RULES_PATH`.
@@ -31,6 +34,7 @@ Design and work log: `docs/plans/MULTI_MONTH_UPLOAD_PLAN.md`.
 - `google_login.py` (OAuth token, once), `register_sheets.py` (the month index), `seed_state.py` (period anchor and ledger from the sheets), `undo_upload.py` (reverse one run).
 - `retry_failed_transactions.py` rewritten for the new layer; it takes no user id any more and skips rows a still-open run owes.
 - `eval_categoriser.py`, `rule_coverage.py`, `apply_rule_draft.py` (score the categoriser against hand-checked months and turn rule decisions into the local rules file; counts only), `sheet_shape.py` (`--summary`, `--folder`), `make_fixture.py`, `sandbox_check.py`, `time_ai_chunk.py`, `add_income_placeholder.py` (one-off).
+- `repair_months.py` checks and repairs the known 2026 layout defects; its live repair was completed and visually approved on 2026-09-28. `backfill_notes.py` backfilled 454 unambiguous description notes on 06-10/2026 after a counts-only dry run; 29 ambiguous rows were left untouched.
 - Removed: `recategorize_pending.py`.
 
 **Deployment**:

@@ -105,6 +105,8 @@ All scripts run from the project root with `venv/bin/python scripts/<name>.py`; 
 | `make_fixture.py` | Anonymises a real export into a test fixture |
 | `add_income_placeholder.py` | One-off, done: wrote `! Nog in te delen !` into `Summary!H35` of the template and the 2026 months |
 | `sandbox_check.py`, `time_ai_chunk.py` | Live Google check on a synthetic month; AI chunk timing |
+| `repair_months.py` | Structure-only dry run for the known 2026 layout repairs; `--apply` after review |
+| `backfill_notes.py` | Counts-only dry run for 06-10/2026 historical description notes; private matching and `--apply` are owner-run |
 
 ## Architecture Overview
 
@@ -116,7 +118,7 @@ All scripts run from the project root with `venv/bin/python scripts/<name>.py`; 
 4. **Split**: `periods.py` splits the rows into financial months on DUO / Anamata salary income, using the persisted anchor (`period_state.py`). A suspicious split writes nothing unless `force`.
 5. **Resolve**: per month, `sheet_registry.py` finds the spreadsheet in `data/sheet_index.json`, or creates the next month from the template.
 6. **Categorise**: rules, then the AI in batch (`categorization_engine.py`). Every row gets a category; unsure ones are flagged (see "Categorisation").
-7. **Append**: `sheet_writer.commit_append` appends each block below the rows already there; the ledger records the rows before the write and audits them after it.
+7. **Append**: `sheet_writer.commit_append` appends each block below the rows already there and adds a bank-detail note to each description cell; the ledger records the rows before the write and audits them after it.
 8. **Sort**: every touched sheet is sorted by date once, except a sheet whose write did not finish.
 9. **Summary**: progress lines and a summary (months, created sheets, skips, flagged rows with the AI guess that was not used) go to the user's Discord thread.
 
@@ -168,15 +170,15 @@ There is no second phase: when a run completes, every accepted row is in a sheet
 
 **Sheet index** (`sheet_index.py`, `sheet_registry.py`): `data/sheet_index.json` maps `MM/YYYY` to a spreadsheet id and is authoritative. The bot has no Drive listing scope, so it cannot rebuild the index by searching; back it up with `data/`. `resolve` may create a month, `lookup` never does. A month is created only when the index misses, `GSHEET_AUTO_CREATE` is on, and the label is the month after the newest indexed one (adjacency guard; `GSHEET_CREATE_NONADJACENT` lifts it). A created month is copied from `GSHEET_TEMPLATE_ID`, named from `GSHEET_NAME_PATTERN`, moved into `GSHEET_FOLDER_ID`, passes a fidelity check (tabs, headers, validation, a behavioural totals check) before it enters the index, and gets the previous month's `Summary!E17` as its starting balance in `Summary!L8`.
 
-**Append, never rewrite** (`sheet_writer.py`): the next free row is read from the sheet each time, never remembered. The writer appends and compacts; it never clears a sheet or writes above `GSHEET_DATA_START_ROW`. A values update is never retried: a failed write is reconciled on `/resume` against the baseline recorded before it. Comparisons go through `row_tuple.canonical`.
+**Append, never rewrite** (`sheet_writer.py`): the next free row is read from the sheet each time, never remembered. The writer appends and compacts; it never clears a sheet or writes above `GSHEET_DATA_START_ROW`. A values update is never retried: a failed write is reconciled on `/resume` against the baseline recorded before it. Comparisons go through `row_tuple.canonical`. New description cells receive bank-detail notes; sort and undo move or remove these notes with their rows.
 
 **Ledger** (`ledger.py`, `data/upload_ledger.json`): the dedup record is written before a block is appended (it may over-record, never under-record); the write audit is written after it, from what landed, and is what `undo_upload.py` removes. The strong key is date, amount, counterparty, raw remittance and the bank's sequence number. Rows written before the ledger existed are known by weak keys (date, absolute amount, block) that `seed_state.py` reads from the sheets.
 
 **Run state** (`run_state.py`, `data/runs/<upload_id>.json`): holds the rows of every month not yet `written` and is saved after each status change (`split`, `resolved`, `categorised`, `appending`, `written`, `failed`). A month in `appending` only leaves it for `written`, through reconciliation. `/upload`, `/sort` and `undo_upload.py` refuse while any month is `appending`, and `/cancel` refuses for a run that has one. One run at a time (in-flight guard).
 
-**Categorisation**: rules first, in order: `CONDITIONAL_RULES_*` in `constants.py` (a pattern plus a condition such as the sending account's role), the rule tables `CATEGORIZATION_RULES_*` in `constants.py` (`{c}` in a description template is the first capture group), then the household's local rules in `src/config/local_rules.tsv` (`local_rules.py`; conditions from `rule_conditions.py`, row features from `tx_features.py`, account roles from `ACCOUNT_ROLES`). A local rule may mark its row or hand it to the AI (`ai`). Rows no rule decides, and rows a local rule hands on, go to Claude through the Claude Code CLI (`claude -p`, Sonnet), anonymised, in batch chunks run in parallel (`AI_MAX_PARALLEL_CHUNKS`), one month per call; a failed chunk is retried once, then falls back to per-row calls up to `AI_PER_TX_FALLBACK_LIMIT`. `AI_RUN_MAX_MINUTES` bounds the AI time per `/upload` or `/resume`. Pot hints (`pot_links.py`: a purchase matching exactly one transfer in from the savings account within 7 days) are context in the AI prompt, never a category. If the CLI is unavailable the engine runs rules only.
+**Categorisation**: rules first, in order: `CONDITIONAL_RULES_*` in `constants.py` (a pattern plus a condition such as the sending account's role), the rule tables `CATEGORIZATION_RULES_*` in `constants.py` (`{c}` in a description template is the first capture group), then the household's local rules in `src/config/local_rules.tsv` (`local_rules.py`; conditions from `rule_conditions.py`, row features from `tx_features.py`, account roles from `ACCOUNT_ROLES`). A local rule may mark its row or hand it to the AI (`ai`). Rows no rule decides, and rows a local rule hands on, go to Claude through the Claude Code CLI (`claude -p`, Sonnet), anonymised, in batch chunks run in parallel (`AI_MAX_PARALLEL_CHUNKS`), one month per call; a failed chunk is retried once, then falls back to per-row calls up to `AI_PER_TX_FALLBACK_LIMIT`. The optional `/upload note` is stored with the run and passed as AI context on upload and resume; it does not force a category. `AI_RUN_MAX_MINUTES` bounds the AI time per `/upload` or `/resume`. Pot hints (`pot_links.py`: a purchase matching exactly one transfer in from the savings account within 7 days) are context in the AI prompt, never a category. If the CLI is unavailable the engine runs rules only.
 
-**Flagging** (`flagging.py`): every row is written. A row whose AI answer is below `AI_CONFIDENCE_THRESHOLD`, or that got no answer (no rule, AI failed or budget spent), is written with the category `! Nog in te delen !` of its block; its AI description is kept when there is one, otherwise the bank text is used. The AI guess that was not used goes into the run state and the summary. A rule row marked for checking keeps its category and gets `? ` before its description. The summary counts `N flagged, M marked`. Both placeholders are withheld from the AI's category options.
+**Flagging** (`flagging.py`): every row is written. A row whose AI answer is below `AI_CONFIDENCE_THRESHOLD`, or that got no answer (no rule, AI failed or budget spent), is written with the category `! Nog in te delen !` of its block; its AI description is kept when there is one, otherwise the bank text is used. The AI guess that was not used goes into the run state, the summary and, when present, the description cell's note. A rule row marked for checking keeps its category and gets `? ` before its description. The summary counts `N flagged, M marked`. Both placeholders are withheld from the AI's category options.
 
 **Household only**: every command is limited to `MENTION_USER_IDS`. Progress and summaries go to a private `Approvals-<name>` thread in the `REMINDER_CHANNEL_ID` channel (the name is historical).
 
@@ -250,7 +252,7 @@ The CSV parser normalizes this to an internal format with fields like `booking_d
 
 One spreadsheet per financial month, named `Maandelijks Budget MM/YYYY`, copied from the template, with two tabs:
 
-- **Transactions**: headers in rows 1-4, data from row 5 (`GSHEET_DATA_START_ROW`). Expenses in columns B-E, income in G-J, each Date, Amount, Description, Category. Amounts are written as absolute values; the block gives the direction. Rows are appended, never rewritten, and the block is sorted by date after an upload.
+- **Transactions**: headers in rows 1-4, data from row 5 (`GSHEET_DATA_START_ROW`). Expenses in columns B-E, income in G-J, each Date, Amount, Description, Category. Amounts are written as absolute values; the block gives the direction. New descriptions have bank-detail notes. Rows are appended, never rewritten, and the block is sorted by date after an upload.
 - **Summary**: `SUMIF` totals per category over the Transactions tab, starting balance in `L8`, closing balance in `E17`. `! Nog in te delen !` is a category in both tables (`B45` expenses, `H35` income), so flagged amounts count in the totals.
 
 ## Bank Automation (New - Session 1+)
@@ -306,7 +308,7 @@ echo "ASN_BROWSERCODE=12345" >> .env
 - Discord.py library logging is reduced to WARNING level to minimize noise
 - **Bank scraper** uses Playwright (Firefox) with persistent context for session management
 - **API authentication** uses `X-API-Key` header (configured via `API_SECRET_KEY`)
-- **Privacy when inspecting**: scripts that read real sheets or exports print structure and counts only, never descriptions, names, IBANs or amounts. Do not open `data/`, real CSV exports or `src/config/local_rules.tsv`; work from `tests/fixtures/multi_month.csv` or ask the user to run a script
+- **Privacy when inspecting**: scripts that read real sheets or exports print structure and counts only, never descriptions, names, IBANs or amounts. The owner-run `backfill_notes.py` compares private rows in memory but prints counts only; do not run its private matching from an agent session without approval. Do not open `data/`, real CSV exports or `src/config/local_rules.tsv`; work from `tests/fixtures/multi_month.csv` or ask the user to run a script
 
 ## Evaluation
 
@@ -331,7 +333,7 @@ All commands are limited to `MENTION_USER_IDS`.
 
 | Command | Description |
 |---------|-------------|
-| `/upload attachment [attachment2..5] [force]` | Upload up to five ASN CSV exports; they are split into months and written; progress and summary in your thread |
+| `/upload attachment [attachment2..5] [force] [note]` | Upload up to five ASN CSV exports; optional AI context note; progress and summary in your thread |
 | `/resume [upload_id]` | Continue an unfinished run (newest open run by default); never re-splits |
 | `/status` | Every open run, and per month what is not written yet |
 | `/cancel [upload_id] [confirm]` | Abandon an open run; `confirm` is needed when unwritten rows would be discarded; never undoes a write |

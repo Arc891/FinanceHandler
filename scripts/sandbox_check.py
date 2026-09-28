@@ -18,7 +18,8 @@ data/sheet_index.json is never touched. Then:
   4. a sort: amounts identical before and after, dates still render as dates,
      no stale tail;
   5. undo from a scratch ledger's audit: the blocks end empty;
-  6. deletes the sandbox month (unless --keep).
+  6. deletes the sandbox month, or leaves one synthetic row in each block
+     with bank notes so the owner can inspect dropdowns and notes (--keep).
 
 It reads only the template's properties and the sandbox month it creates.
 Needs the OAuth token from scripts/google_login.py.
@@ -38,7 +39,7 @@ from gspread.utils import ValueRenderOption  # noqa: E402
 from finance_core.ledger import Ledger  # noqa: E402
 from finance_core.row_tuple import EXPENSES, INCOME, canonical  # noqa: E402
 from finance_core.sheet_registry import RegistryConfig, SheetRegistry  # noqa: E402
-from finance_core.sheet_writer import (commit_append, intended_cells, read_block,  # noqa: E402
+from finance_core.sheet_writer import (commit_append, intended_cells, read_block, read_notes,  # noqa: E402
                                        remove_rows, sort_by_date)
 
 LABEL = "12/2099"
@@ -156,11 +157,20 @@ def run_checks(workbooks, say, keep=False, template_id=None) -> int:
                 report.check(f"{name}: removed {removed}, not found {not_found}", not_found == 0)
         empty = read_block(sh, EXPENSES).tuples == [] and read_block(sh, INCOME).tuples == []
         report.check("both blocks empty after undo (tail blanked, nothing left behind)", empty)
+        if keep and empty and not report.failed:
+            # Leave known synthetic examples so the owner can inspect notes and
+            # dropdown behaviour in the saved sandbox month.
+            commit_append(sh, EXPENSES, [EXPENSE_ROWS[0]], failed_path=os.path.join(scratch, "failed.json"))
+            commit_append(sh, INCOME, [INCOME_ROWS[0]], failed_path=os.path.join(scratch, "failed.json"))
+            start = read_block(sh, EXPENSES).start
+            report.check("expense sample has a bank note", bool(read_notes(ws, EXPENSES, start, start)[0]))
+            report.check("income sample has a bank note", bool(read_notes(ws, INCOME, start, start)[0]))
+            say("6. sample rows kept for visual review of notes and dropdowns")
     except Exception:
         report.check("unexpected error", False, traceback.format_exc())
     finally:
         if keep:
-            say(f"6. kept: https://docs.google.com/spreadsheets/d/{sheet_id}")
+            say(f"7. kept: https://docs.google.com/spreadsheets/d/{sheet_id}")
         else:
             workbooks.delete_file(sheet_id)
             say(f"6. deleted the sandbox month {sheet_id}")

@@ -2686,6 +2686,41 @@ measures them on months where the right answer is already known.
   `tests/test_google_auth.py`. Left: the three keys and the key file out of
   the Pi's config, a redeploy, `/docs-update`.
 
+- Follow-up 2026-09-28, unreleased code and live layout repair:
+  - `/upload` gained an optional per-run AI context note, stored for `/resume`.
+    New rows have bank-detail notes on their description cells; flagged rows
+    include the unused AI guess when available. Sort and undo move notes with
+    rows. Rows already written were not recategorised.
+  - The owner approved and visually checked the known template and 2026
+    layout repair. `repair_months.py` performed 33 reviewed operations; its
+    read-only recheck found no remaining label, value or format repair. The
+    four validation rebinds remain in the plan because Sheets metadata cannot
+    prove a binding; the owner's visual check found the live sheets correct.
+  - The new code passed `sandbox_check.py --keep` on a synthetic 12/2099 month:
+    creation and behavioural fidelity, folder placement, row round trips,
+    date and amount formatting, sort and audit-based undo all passed. The
+    sandbox month held one synthetic row in each block and two bank notes for
+    the owner's dropdown and note inspection. The owner approved them, then
+    both synthetic sandbox sheets were trashed.
+  - `backfill_notes.py` offers a counts-only dry run for 06-10/2026 from
+    the original export. It matches each block by date and amount with equal
+    multiplicity, uses exact bank text only to resolve duplicates, and fills
+    empty notes only after a fresh row and note check. Ambiguous rows are
+    skipped. The owner approved private matching and live note writes on
+    2026-09-28. The dry run found 454 safe matches, 29 ambiguous rows, no
+    unmatched rows and no invalid export rows. The apply wrote and read back
+    454 notes; the 29 ambiguous rows were left untouched. A follow-up dry run
+    found 0 planned, 454 occupied, 29 ambiguous and 0 unmatched. Transaction
+    text was never printed. Temporary index and OAuth token copies were
+    removed. Older AI guesses cannot be reconstructed.
+  - Release still needs explicit push and Pi deploy authorization. The Pi
+    checkout was `c347686` on 2026-09-28; Docker image and rollback-tag state
+    could not be inspected with the `pi` account. The Pi's backup script does
+    not stage FinanceAutomation `data/`, so the authoritative index has no
+    coverage from that job. The homelab Finance Bot docs were updated locally
+    but not published. The owner checks (06/2026 starting balance, flagged
+    rows, `/tmp/eval`) and removal of retired Pi config keys remain.
+
 ## 7. Risks and mitigations
 
 | Risk | Likelihood | Mitigation |

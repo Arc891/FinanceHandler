@@ -35,3 +35,9 @@ def test_keep_leaves_the_month():
     code, out = run(wb, "--keep")
     assert code == 0
     assert len(wb.created_ids()) == 1
+    kept = wb.open(wb.created_ids()[0])
+    assert len(kept.transactions.rows("B", "E")) == 1
+    assert len(kept.transactions.rows("G", "J")) == 1
+    assert kept.transactions.notes[(5, 4)].startswith("Tegenpartij: Sandbox Tegenpartij")
+    assert kept.transactions.notes[(5, 9)].startswith("Tegenpartij: Sandbox Tegenpartij")
+    assert "sample rows kept for visual review" in out

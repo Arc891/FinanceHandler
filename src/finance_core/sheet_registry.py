@@ -438,27 +438,7 @@ class GoogleWorkbooks:
         got = self.sheets.get(spreadsheetId=sheet_id, includeGridData=True,
                               fields="sheets(properties(sheetId),data(startRow,startColumn,"
                                      "rowData(values(dataValidation))))").execute()
-        cells = {}
-        for sheet in got.get("sheets", []):
-            if sheet["properties"]["sheetId"] != tab_id:
-                continue
-            for data in sheet.get("data", []):
-                r0, c0 = data.get("startRow", 0), data.get("startColumn", 0)
-                for i, row in enumerate(data.get("rowData", [])):
-                    for j, cell in enumerate(row.get("values", [])):
-                        if "dataValidation" in cell:
-                            cells[(c0 + j, r0 + i)] = cell["dataValidation"]
-        requests = []
-        for col, row in sorted(cells):
-            rule = cells[(col, row)]
-            last = requests[-1]["setDataValidation"] if requests else None
-            if (last and last["range"]["startColumnIndex"] == col and last["range"]["endRowIndex"] == row
-                    and last["rule"] == rule):
-                last["range"]["endRowIndex"] = row + 1
-                continue
-            requests.append({"setDataValidation": {"range": {
-                "sheetId": tab_id, "startRowIndex": row, "endRowIndex": row + 1,
-                "startColumnIndex": col, "endColumnIndex": col + 1}, "rule": rule}})
+        requests = validation_requests(got, tab_id)
         if requests:
             self.sheets.batchUpdate(spreadsheetId=sheet_id, body={"requests": requests}).execute()
 
@@ -518,3 +498,29 @@ class GoogleWorkbooks:
         cond = rule.get("condition", {})
         return {"type": cond.get("type"),
                 "values": [v.get("userEnteredValue") for v in cond.get("values", [])]}
+
+
+def validation_requests(metadata, tab_id) -> list:
+    """Plan the same validation rebind used during creation, without writing."""
+    cells = {}
+    for sheet in metadata.get("sheets", []):
+        if sheet["properties"]["sheetId"] != tab_id:
+            continue
+        for data in sheet.get("data", []):
+            r0, c0 = data.get("startRow", 0), data.get("startColumn", 0)
+            for i, row in enumerate(data.get("rowData", [])):
+                for j, cell in enumerate(row.get("values", [])):
+                    if "dataValidation" in cell:
+                        cells[(c0 + j, r0 + i)] = cell["dataValidation"]
+    requests = []
+    for col, row in sorted(cells):
+        rule = cells[(col, row)]
+        last = requests[-1]["setDataValidation"] if requests else None
+        if (last and last["range"]["startColumnIndex"] == col and last["range"]["endRowIndex"] == row
+                and last["rule"] == rule):
+            last["range"]["endRowIndex"] = row + 1
+            continue
+        requests.append({"setDataValidation": {"range": {
+            "sheetId": tab_id, "startRowIndex": row, "endRowIndex": row + 1,
+            "startColumnIndex": col, "endColumnIndex": col + 1}, "rule": rule}})
+    return requests

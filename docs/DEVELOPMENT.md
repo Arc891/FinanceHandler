@@ -67,6 +67,7 @@ The sheets and exports hold the household's real transactions. Anything that rea
 
 - `scripts/sheet_shape.py` prints tab names, header rows, row counts, date ranges, category counts and formulas with their numbers and texts masked; never an amount, description, counterparty or IBAN.
 - `scripts/eval_categoriser.py`, `rule_coverage.py`, `apply_rule_draft.py`, `retry_failed_transactions.py` and `time_ai_chunk.py` print counts, percentages, category names and anonymous group ids; `seed_state.py` prints dates and labels only. Where names or amounts are needed (rule drafts), they go to a file with mode 0600 for the user to read.
+- `scripts/backfill_notes.py` is an owner-run exception: it compares private transaction rows and the original export in memory, but its output is counts only. Do not run its private matching from an agent session without approval, and do not share the export or a debug trace.
 - Log lines carry labels, statuses and counts, never a name, description, remittance text or amount; `tests/test_log_privacy.py` enforces this for the categorisation path and the pipeline.
 - Do not open `data/`, real CSV exports or `src/config/local_rules.tsv` while developing. Use the anonymised fixture `tests/fixtures/multi_month.csv`, made with `scripts/make_fixture.py`, or ask the user to run a script and paste its output.
 

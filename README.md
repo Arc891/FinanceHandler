@@ -35,7 +35,7 @@ All commands are limited to the household (`MENTION_USER_IDS`).
 
 | Command | Does |
 |---|---|
-| `/upload attachment [attachment2..5] [force]` | Process up to five ASN CSV exports |
+| `/upload attachment [attachment2..5] [force] [note]` | Process up to five ASN CSV exports; optional note gives the AI context for this run |
 | `/resume [upload_id]` | Continue an unfinished run (newest by default) |
 | `/status` | Open runs, and per month what is not written yet |
 | `/cancel [upload_id] [confirm]` | Abandon an open run; never undoes a write |
@@ -51,7 +51,9 @@ A daily reminder to upload is posted in `REMINDER_CHANNEL_ID` at
 Each month is a spreadsheet named `Maandelijks Budget MM/YYYY` with two tabs:
 
 - **Transactions**: expenses in columns B-E, income in G-J (date, amount,
-  description, category), data from row 5.
+  description, category), data from row 5. New rows have a note on the
+  description cell with the bank's counterparty, account and remittance text.
+  A flagged row's note also has the unused AI category guess when available.
 - **Summary**: totals per category, starting balance in `L8`, closing balance in
   `E17`. The starting balance of a created month is the previous month's closing
   balance.
@@ -62,6 +64,20 @@ After an upload, filter the Transactions tab on:
   enough. These amounts are still counted in the Summary under that category.
 - descriptions starting with `? `: a household rule chose the category but asked
   for a check.
+
+The optional `/upload note` is sent as context to the AI for that upload and
+kept with the run so `/resume` uses it too. It does not force a category.
+On 2026-09-28, a one-off backfill added notes to 454 unambiguous rows in
+06-10/2026; 29 ambiguous rows were left untouched. Existing notes were not
+overwritten.
+
+To plan a note backfill for 06-10/2026 from the original ASN export, run
+`venv/bin/python scripts/backfill_notes.py --csv /private/export.csv` on a
+machine with the authoritative `data/sheet_index.json` and Google OAuth token.
+The default prints counts only and writes nothing. Review its ambiguous and
+unmatched counts before any apply; the script's docstring gives the apply
+command. It fills only empty notes whose bank rows match unambiguously.
+Historical AI guesses cannot be recovered from the export.
 
 ## Setup
 
