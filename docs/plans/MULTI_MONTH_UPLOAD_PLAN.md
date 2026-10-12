@@ -2563,8 +2563,16 @@ measures them on months where the right answer is already known.
     Every arm stays low on Cadeautjes and Ander; the local arms gain on
     Boodschappen and Uit spaarpotje but lose more on Dates/uitjes and
     Auto / vervoer / OV.
+  - Review (Codex, read-only, 2026-10-12) fixed before merging: Laya's
+    network check now requires loopback as the only interface; training
+    files and checkpoints are removed on every error path; the CSV working
+    copies are 0600; a changed Jev version within a run stops it; in a key
+    group with several categories, (d) credits the category an answer
+    matched and McNemar pairs by group. Re-scored (`report-4.txt`): one
+    group moved, Ander and Dates/uitjes by up to 5 points for both sides;
+    every verdict and McNemar count is unchanged.
   - On the workstation only: `~/finance-eval/` (export, predictions,
-    `report-3.txt`, all 0600). The Pi's `/tmp/eval` is removed.
+    `report-4.txt`, all 0600). The Pi's `/tmp/eval` is removed.
 
 **Phase 4, tools, docs, cutover** (in this order)
 
