@@ -44,6 +44,22 @@ image's config and service account are used as they are):
     docker exec finance-automation-bot python /tmp/eval/eval_categoriser.py \\
         --src /tmp/eval/src --rules --local-rules /tmp/eval/local_rules.tsv \\
         --account-roles /tmp/eval/account_roles.txt /tmp/eval/*.csv
+    # Shadow-eval (jev-investigation.md §5.1 step 1; scripts/shadow_eval.py
+    # must sit next to this script: scp it along). Sonnet on every month, with
+    # the household's rules, writing the rows file and its answers (0600, no
+    # transaction text in either):
+    docker exec finance-automation-bot python /tmp/eval/eval_categoriser.py \\
+        --src /tmp/eval/src --model sonnet --local-rules /tmp/eval/local_rules.tsv \\
+        --account-roles /tmp/eval/account_roles.txt \\
+        --rows-out /tmp/eval/rows.jsonl --predictions-out /tmp/eval/pred-sonnet.jsonl \\
+        /tmp/eval/*.csv
+    # The local arms' training export, owner-run: rules only, no AI, every
+    # scored row WITH its text. Copy it straight to the workstation (0600)
+    # and delete it from the Pi; it is never printed and never pushed.
+    docker exec finance-automation-bot python /tmp/eval/eval_categoriser.py \\
+        --src /tmp/eval/src --local-rules /tmp/eval/local_rules.tsv \\
+        --account-roles /tmp/eval/account_roles.txt \\
+        --export-out /tmp/eval/export.jsonl /tmp/eval/*.csv
     # afterwards, remove the exports from both places
     docker exec finance-automation-bot rm -rf /tmp/eval
     rm -rf /tmp/eval
@@ -610,6 +626,89 @@ def build_engine(model, local_rules, make_ai=None):
                                 local_rules=local_rules)
 
 
+def rules_engine(local_rules):
+    """The engine with the AI off: only the rules decide, the rest comes back
+    with method 'none'. Tells which rows today's rules send to the AI."""
+    from finance_core.categorization_engine import CategorizationEngine
+    return CategorizationEngine(ai_categorizer=None, ai_enabled=False, local_rules=local_rules)
+
+
+# ── shadow-eval files (jev-investigation.md §5.1 step 1; scripts/shadow_eval.py) ──
+
+def _is_routed(result) -> bool:
+    """A row today's rules do not decide, so production sends it to the AI."""
+    return getattr(result, "method", "none") != "regex"
+
+
+def rows_payload(m, results):
+    """(fingerprint, rows) for the rows file: per scored row its month, block,
+    key group, true category and routing. No transaction content."""
+    from shadow_eval import fingerprint
+    group_ids, taken, rows = {}, Counter(), []
+    for r in m.records:
+        gid = group_ids.setdefault(r.group, len(group_ids))
+        truth = m.truths[r.group][taken[r.group]]
+        taken[r.group] += 1
+        rows.append({"id": r.index, "label": r.label, "block": r.group[3], "group": gid,
+                     "truth": truth, "routed": _is_routed(results[r.index])})
+    return fingerprint(r.group for r in m.records), rows
+
+
+def predictions_payload(m, results):
+    """One line per routed row: the answer and its confidence (None: no answer)."""
+    out = []
+    for r in m.records:
+        res = results[r.index]
+        if not _is_routed(res):
+            continue
+        out.append({"id": r.index, "category": getattr(res, "category", None),
+                    "confidence": float(getattr(res, "confidence", 0.0) or 0.0)})
+    return out
+
+
+def _counterparty(tx):
+    for side in ("creditor", "debtor"):
+        name = ((tx.get(side) or {}).get("name") or "").strip()
+        if name:
+            return name
+    return ""
+
+
+def export_payload(m, results, roles=None):
+    """(fingerprint, rows) for the private export: the rows file's fields plus
+    the row's own text and features, for the local arms. Never printed."""
+    from finance_core import tx_features as tf
+    from finance_core.pot_links import pot_hints
+    if roles is not None:
+        tf.use_account_roles(roles)
+    savings = set(tf.account_roles().get("savings", []))
+    hinted = set()
+    by_label = defaultdict(list)
+    for r in m.records:
+        by_label[r.label].append(r)
+    for recs in by_label.values():
+        txs = [r.tx for r in recs]
+        routed = [i for i, r in enumerate(recs) if _is_routed(results[r.index])]
+        hints = pot_hints(txs, routed, savings) if savings else {}
+        hinted.update(recs[i].index for i in hints)
+    fp, rows = rows_payload(m, results)
+    for row, r in zip(rows, m.records):
+        tx, day = r.tx, tf.tx_day(r.tx)
+        row["tx"] = {
+            "direction": tf.tx_direction(tx), "amount": tf.tx_amount(tx), "code": tf.tx_code(tx),
+            "weekday": None if day is None else day.weekday(), "hour": tf.tx_hour(tx),
+            "counterparty": _counterparty(tx), "remittance": tf.remittance_text(tx),
+            "counterparty_iban": tf.normalise_iban(tx.get("counterparty_iban")),
+            "account_role": tf.account_role(tx), "pot_hint": r.index in hinted}
+    return fp, rows
+
+
+def write_shadow_file(path, kind, fp, rows, say, **extra):
+    from shadow_eval import write_private_jsonl
+    write_private_jsonl(path, {"kind": kind, **extra, "fingerprint": fp}, rows)
+    say(f"{kind} written to {path} (0600, {len(rows)} lines, not shown)")
+
+
 def load_exports(paths):
     from finance_core.csv_helper import load_transactions_from_csv
     from finance_core.ledger import collapse_within_upload
@@ -684,6 +783,15 @@ def run(args, counter):
             rc.write_draft(cov, args.draft_out)
             say(f"draft written to {args.draft_out} (not shown)")
         return 0
+    if args.export_out:
+        results = asyncio.run(categorise(rules_engine(local_rules), m.records, None, lambda *_: None))
+        fp, rows = export_payload(m, results)
+        say("")
+        say(f"rows the rules send to the AI: {sum(1 for r in rows if r['routed'])} of {len(rows)}")
+        write_shadow_file(args.export_out, "export", fp, rows, say)
+        if args.rows_out:
+            write_shadow_file(args.rows_out, "rows", *rows_payload(m, results), say)
+        return 0
     if args.dry_run or not m.records:
         say("")
         say("dry run: nothing sent to the AI" if args.dry_run else "no rows to score")
@@ -700,6 +808,13 @@ def run(args, counter):
         say(f"run {n} took {(time.monotonic() - started) / 60:.1f} min")
         for line in format_report(build_report(rows), m, runs=None, brief=n > 1):
             say(line)
+        if n == 1 and args.rows_out:
+            write_shadow_file(args.rows_out, "rows", *rows_payload(m, results), say)
+        if n == 1 and args.predictions_out:
+            fp, _ = rows_payload(m, results)
+            write_shadow_file(args.predictions_out, "predictions", fp, predictions_payload(m, results),
+                              say, arm=args.model,
+                              split="any", local=False)
     if len(runs) > 1:
         n, differ = disagreement([[r["pred"] for r in run] for run in runs])
         say(f"\nruns disagree on {differ}/{n} rows ({100 * differ / n:.1f}%)")
@@ -741,11 +856,22 @@ def main(argv=None) -> int:
                         help="private file, one account per line: role, then IBAN")
     parser.add_argument("--amount-cuts", action="append", type=parse_cuts, metavar="ID=A,B,..",
                         help="with --rules: per cut, what a group's rows from it up and below it are")
+    parser.add_argument("--rows-out", metavar="PATH",
+                        help="shadow-eval: write the rows file (0600; no transaction content)")
+    parser.add_argument("--predictions-out", metavar="PATH",
+                        help="shadow-eval: write run 1's answers on the routed rows (0600)")
+    parser.add_argument("--export-out", metavar="PATH",
+                        help="shadow-eval: rules only, no AI; write every scored row with its "
+                             "text for the local arms (0600, never printed; owner-run)")
     parser.add_argument("--debug", action="store_true",
                         help="show tracebacks; may print row content")
     args = parser.parse_args(argv)
     if args.amount_cuts and not args.rules:
         parser.error("--amount-cuts works with --rules only")
+    if args.export_out and (args.rules or args.dry_run or args.predictions_out):
+        parser.error("--export-out runs the rules alone; not with --rules, --dry-run or --predictions-out")
+    if args.predictions_out and (args.rules or args.dry_run):
+        parser.error("--predictions-out needs an AI run")
     if args.src:
         sys.path.insert(0, args.src)
     counter = install_quiet_logging()
