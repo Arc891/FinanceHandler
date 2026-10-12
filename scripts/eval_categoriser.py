@@ -47,10 +47,12 @@ image's config and service account are used as they are):
     # Shadow-eval (jev-investigation.md §5.1 step 1; scripts/shadow_eval.py
     # must sit next to this script: scp it along). Sonnet on every month, with
     # the household's rules, writing the rows file and its answers (0600, no
-    # transaction text in either):
+    # transaction text in either). Every shadow-eval run (Sonnet, export, Jev)
+    # must get the same --map list and the same exports, or its file covers
+    # other rows and shadow_eval.py refuses it (fingerprint differs):
     docker exec finance-automation-bot python /tmp/eval/eval_categoriser.py \\
         --src /tmp/eval/src --model sonnet --local-rules /tmp/eval/local_rules.tsv \\
-        --account-roles /tmp/eval/account_roles.txt \\
+        --account-roles /tmp/eval/account_roles.txt --map OLD=NEW \\
         --rows-out /tmp/eval/rows.jsonl --predictions-out /tmp/eval/pred-sonnet.jsonl \\
         /tmp/eval/*.csv
     # The local arms' training export, owner-run: rules only, no AI, every
@@ -58,14 +60,14 @@ image's config and service account are used as they are):
     # and delete it from the Pi; it is never printed and never pushed.
     docker exec finance-automation-bot python /tmp/eval/eval_categoriser.py \\
         --src /tmp/eval/src --local-rules /tmp/eval/local_rules.tsv \\
-        --account-roles /tmp/eval/account_roles.txt \\
+        --account-roles /tmp/eval/account_roles.txt --map OLD=NEW \\
         --export-out /tmp/eval/export.jsonl /tmp/eval/*.csv
     # Hosted Jev (arm 2; jev_client.py next to this script too): rules only,
     # then one zero-data-retention decision per routed row on the anonymised
     # text. The key file is placed with token-place and never printed.
     docker exec finance-automation-bot python /tmp/eval/eval_categoriser.py \\
         --src /tmp/eval/src --local-rules /tmp/eval/local_rules.tsv \\
-        --account-roles /tmp/eval/account_roles.txt \\
+        --account-roles /tmp/eval/account_roles.txt --map OLD=NEW \\
         --openrouter-key-file /tmp/eval/openrouter.key \\
         --jev-out /tmp/eval/pred-jev.jsonl /tmp/eval/*.csv
     # afterwards, remove the exports from both places
