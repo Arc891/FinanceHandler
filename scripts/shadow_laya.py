@@ -52,8 +52,9 @@ def question(options):
 
 
 class LayaModel:
-    def __init__(self, base, device, epochs, workdir, finetune=None, load=None):
+    def __init__(self, base, device, epochs, workdir, finetune=None, load=None, grad_accum=8):
         self.base, self.device, self.epochs, self.workdir = base, device, epochs, workdir
+        self.grad_accum = grad_accum
         self._finetune, self._load = finetune, load
         self.dir = None
 
@@ -82,7 +83,7 @@ class LayaModel:
             from types import SimpleNamespace as TrainConfig
         try:
             self._finetune(data, self.base, os.path.join(self.dir, "ckpt"),
-                           config=TrainConfig(epochs=self.epochs, seed=0), device=self.device)
+                           config=TrainConfig(epochs=self.epochs, grad_accum=self.grad_accum, seed=0), device=self.device)
         finally:
             os.remove(data)
         self.agent = self._load(os.path.join(self.dir, "ckpt"), device=self.device)
@@ -121,4 +122,8 @@ def factory(args):
     os.environ.setdefault("HF_HUB_OFFLINE", "1")
     workdir = os.path.join(args.out_dir, "laya-work")
     os.makedirs(workdir, mode=0o700, exist_ok=True)
-    return lambda: LayaModel(args.base, args.device, args.epochs, workdir)
+    settings = getattr(args, "settings", None)
+    if not settings:
+        return lambda: LayaModel(args.base, args.device, args.epochs, workdir)
+    return {f"{e}x{a}": (lambda e=e, a=a: LayaModel(args.base, args.device, e, workdir, grad_accum=a))
+            for e, a in sl.parse_settings(settings)}

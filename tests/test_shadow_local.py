@@ -212,3 +212,35 @@ def test_the_classical_model_learns_counterparties():
     preds, _ = sl.run_arm(rows, sl.ClassicalModel, "alternating")
     test_rows = [r for r in rows if r["label"] == "07/2024" and r["routed"]]
     assert all(preds[r["id"]]["category"] == r["truth"] for r in test_rows)
+
+
+# ── choosing a training setting on the train months only ───────────────────
+
+class UniformModel(MemoModel):
+    def logits(self, rows):
+        return self.classes, [[0.0] * len(self.classes) for _ in rows]
+
+
+def test_selection_picks_the_setting_with_the_best_out_of_fold_accuracy():
+    rows = export_rows()
+    preds, info = sl.run_arm(rows, {"bad": UniformModel, "good": MemoModel}, "alternating")
+    assert info["chosen"] == "good"
+    assert info["oof_accuracy"]["good"] > info["oof_accuracy"]["bad"]
+    test_jumbo = next(r for r in rows if r["label"] == "07/2024" and r["tx"]["counterparty"] == "Jumbo")
+    assert preds[test_jumbo["id"]]["category"] == "Boodschappen"
+
+
+def test_selection_never_fits_on_a_test_month_and_fits_the_final_once():
+    rows = export_rows()
+    sl.run_arm(rows, {"bad": UniformModel, "good": MemoModel}, "alternating")
+    split = se.split_months([r["label"] for r in rows], "alternating")
+    by_id = {r["id"]: r for r in rows}
+    for fitted in MemoModel.fits:
+        assert all(split[by_id[i]["label"]] == "train" for i in fitted)
+    assert len(MemoModel.fits) == 2 * sl.FOLDS + 1
+
+
+def test_parse_laya_settings():
+    assert sl.parse_settings("4x8,12x1") == [(4, 8), (12, 1)]
+    with pytest.raises(ValueError):
+        sl.parse_settings("4,8")

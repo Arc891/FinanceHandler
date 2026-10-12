@@ -121,21 +121,9 @@ def _close(model):
         model.close()
 
 
-def run_arm(rows, make_model, split_kind, folds=FOLDS):
-    """({id: {"category", "confidence"}} for every routed row, info).
-
-    `make_model()` returns an object with fit(rows) and logits(rows) ->
-    (classes, [[logit per class]]). No fit ever sees a test month.
-    """
-    split = se.split_months([r["label"] for r in rows], split_kind)
-    train = [r for r in rows if split[r["label"]] == "train"]
-    test_routed = [r for r in rows if split[r["label"]] == "test" and r["routed"]]
-    allowed = defaultdict(set)
-    for r in train:
-        allowed[r["block"]].add(r["truth"])
-
-    fold_of = month_folds([r["label"] for r in train], folds)
-    oof = []                                    # (row, classes, logits)
+def _out_of_fold(train, make_model, fold_of, allowed):
+    """(row, classes, masked logits) for every train row, from models that never saw its fold."""
+    oof = []
     for f in sorted(set(fold_of.values())):
         fit_rows = [r for r in train if fold_of[r["label"]] != f]
         held = [r for r in train if fold_of[r["label"]] == f]
@@ -146,6 +134,39 @@ def run_arm(rows, make_model, split_kind, folds=FOLDS):
         classes, logits = model.logits(held)
         _close(model)
         oof += [(r, classes, masked(lg, classes, allowed[r["block"]])) for r, lg in zip(held, logits)]
+    return oof
+
+
+def _accuracy(oof):
+    if not oof:
+        return 0.0
+    right = sum(1 for r, classes, lg in oof
+                if classes and classes[max(range(len(lg)), key=lg.__getitem__)] == r["truth"])
+    return right / len(oof)
+
+
+def run_arm(rows, make_model, split_kind, folds=FOLDS):
+    """({id: {"category", "confidence"}} for every routed row, info).
+
+    `make_model()` returns an object with fit(rows) and logits(rows) ->
+    (classes, [[logit per class]]). A dict {setting: make_model} is a choice
+    between training settings, made on the out-of-fold accuracy of the train
+    months (ties go to the first). No fit ever sees a test month.
+    """
+    candidates = make_model if isinstance(make_model, dict) else {"default": make_model}
+    split = se.split_months([r["label"] for r in rows], split_kind)
+    train = [r for r in rows if split[r["label"]] == "train"]
+    test_routed = [r for r in rows if split[r["label"]] == "test" and r["routed"]]
+    allowed = defaultdict(set)
+    for r in train:
+        allowed[r["block"]].add(r["truth"])
+
+    fold_of = month_folds([r["label"] for r in train], folds)
+    oofs = {name: _out_of_fold(train, mk, fold_of, allowed) for name, mk in candidates.items()}
+    accuracy = {name: _accuracy(o) for name, o in oofs.items()}
+    names = list(candidates)
+    chosen = max(names, key=lambda n: (accuracy[n], -names.index(n)))
+    oof = oofs[chosen]
 
     cal_logits, cal_gold = [], []
     for r, classes, lg in oof:
@@ -160,15 +181,26 @@ def run_arm(rows, make_model, split_kind, folds=FOLDS):
         return {"category": classes[best], "confidence": round(p[best], 6)}
 
     preds = {r["id"]: answer(classes, lg) for r, classes, lg in oof if r["routed"]}
-    model = make_model()
+    model = candidates[chosen]()
     model.fit(train)
     classes, logits = model.logits(test_routed)
     _close(model)
     for r, lg in zip(test_routed, logits):
         preds[r["id"]] = answer(classes, masked(lg, classes, allowed[r["block"]]))
     info = {"temperature": temperature, "train_rows": len(train), "calibration_rows": len(cal_gold),
-            "test_rows": len(test_routed)}
+            "test_rows": len(test_routed), "chosen": chosen, "oof_accuracy": accuracy}
     return preds, info
+
+
+def parse_settings(arg):
+    """`4x8,12x1` -> [(4, 8), (12, 1)]: epochs x gradient accumulation."""
+    out = []
+    for part in arg.split(","):
+        epochs, sep, accum = part.strip().partition("x")
+        if not sep or not epochs.isdigit() or not accum.isdigit():
+            raise ValueError(f"expected EPOCHSxACCUM, got {part!r}")
+        out.append((int(epochs), int(accum)))
+    return out
 
 
 # ── the models ──────────────────────────────────────────────────────────────
@@ -213,6 +245,9 @@ def main(argv=None) -> int:
     parser.add_argument("--splits", default=",".join(se.SPLITS))
     parser.add_argument("--device", default="cuda", help="laya: cuda or cpu")
     parser.add_argument("--base", help="laya: the downloaded base checkpoint (see shadow_laya.py)")
+    parser.add_argument("--settings", help="laya: training settings to choose between on the train "
+                                           "months, e.g. 4x8,12x1 (epochs x gradient accumulation)")
+    parser.add_argument("--name", help="the arm's name in the files (default: the arm)")
     parser.add_argument("--epochs", type=int, default=4, help="laya: fine-tune epochs")
     args = parser.parse_args(argv)
     if args.arm not in ARMS:
@@ -239,11 +274,16 @@ def main(argv=None) -> int:
           f"{len({r['label'] for r in rows})} months")
     for split in args.splits.split(","):
         preds, info = run_arm(rows, make_model, split)
-        path = os.path.join(args.out_dir, f"pred-{args.arm}-{split}.jsonl")
-        se.write_private_jsonl(path, {"kind": "predictions", "arm": args.arm, "split": split,
+        name = args.name or args.arm
+        path = os.path.join(args.out_dir, f"pred-{name}-{split}.jsonl")
+        extra = {} if info["chosen"] == "default" else {"setting": info["chosen"]}
+        se.write_private_jsonl(path, {"kind": "predictions", "arm": name, "split": split,
                                       "local": True, "fingerprint": header["fingerprint"],
-                                      "temperature": info["temperature"]},
+                                      "temperature": info["temperature"], **extra},
                                [{"id": i, **p} for i, p in sorted(preds.items())])
+        if info["chosen"] != "default":
+            print(f"{split}: setting {info['chosen']} chosen on out-of-fold accuracy " + ", ".join(
+                f"{k} {100 * v:.1f}%" for k, v in info["oof_accuracy"].items()))
         print(f"{split}: trained on {info['train_rows']} rows, temperature {info['temperature']:.2f} "
               f"from {info['calibration_rows']} out-of-fold rows, {info['test_rows']} test rows; "
               f"{len(preds)} answers written to {path} (0600, not shown)")

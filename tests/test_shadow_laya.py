@@ -110,3 +110,11 @@ def test_run_arm_closes_every_model(tmp_path):
 
     sl.run_arm(export_rows(), M, "alternating")
     assert len(closed) == sl.FOLDS + 1
+
+
+def test_the_setting_reaches_the_training_config(tmp_path):
+    seen = []
+    model = make(tmp_path, seen)
+    model.grad_accum = 1
+    model.fit(export_rows())
+    assert seen[-1]["config"].grad_accum == 1
