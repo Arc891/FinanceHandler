@@ -1,0 +1,4 @@
+# Workstation only: the local arms of the shadow-eval (scripts/shadow_local.py).
+# Never in the bot image. Install into its own venv:
+#   python3 -m venv venv-eval && venv-eval/bin/pip install -r requirements.txt -r requirements-dev.txt -r requirements-eval.txt
+scikit-learn==1.5.2
