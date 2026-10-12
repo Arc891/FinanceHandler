@@ -236,3 +236,16 @@ def test_jev_refuses_to_run_without_zdr(monkeypatch, capsys, tmp_path, root_logg
     assert code == 2 and "zero data retention" in capsys.readouterr().out
     assert session.posts == []
     assert not (tmp_path / "p.jsonl").exists()
+
+
+def test_a_changed_resolved_version_mid_run_stops_the_run():
+    import jev_client
+    m = month()
+    results = [res(None, "none", 0.0), res("Abonnementen", "regex", 1.0), res(None, "none", 0.0)]
+    versions = iter(["typesafe/jev-1.13-20260917", "typesafe/jev-1.13-20261001"])
+
+    def ask(state, questions):
+        return {"category": None, "confidence": 0.5, "nouls": {}, "model": next(versions)}
+
+    with pytest.raises(jev_client.ModelChanged):
+        ev.jev_payload(m, results, ask, EXPENSES, INCOME)

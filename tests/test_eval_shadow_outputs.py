@@ -173,3 +173,19 @@ def test_predictions_out_needs_an_ai_run(capsys):
         ev.main(["--predictions-out", "p.jsonl", "--export-out", "e.jsonl", "x.csv"])
     with pytest.raises(SystemExit):
         ev.main(["--export-out", "e.jsonl", "--rules", "x.csv"])
+
+
+def test_the_exports_working_copies_are_private(tmp_path, monkeypatch):
+    import stat as st
+    import finance_core.csv_helper as ch
+    src = tmp_path / "asn.csv"
+    src.write_text("x\n")
+    os.chmod(src, 0o644)
+    modes = []
+
+    def load(path):
+        modes.append(st.S_IMODE(os.stat(path).st_mode))
+        return []
+    monkeypatch.setattr(ch, "load_transactions_from_csv", load)
+    ev.load_exports([str(src)])
+    assert modes == [0o600]

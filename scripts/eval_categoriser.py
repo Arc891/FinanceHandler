@@ -20,7 +20,7 @@ image's config and service account are used as they are):
 
     # on the workstation
     git archive --format=tar HEAD src/automation src/finance_core src/constants.py \\
-        | ssh rp5 'mkdir -p /tmp/eval && cat > /tmp/eval/branch-src.tar'
+        | ssh rp5 'umask 077 && mkdir -p /tmp/eval && cat > /tmp/eval/branch-src.tar'
     scp scripts/eval_categoriser.py rp5:/tmp/eval/
     scp <your 2024 and 2025 ASN exports>.csv rp5:/tmp/eval/
     # on the Pi
@@ -752,6 +752,9 @@ def jev_payload(m, results, ask, expense_criteria, income_criteria, say=lambda *
                 "same_counterparty_this_month": context}
             block = recs[i].group[3]
             got = ask(state, jev_questions(income_criteria if block == "income" else expense_criteria))
+            if model and got.get("model") and got["model"] != model:
+                import jev_client
+                raise jev_client.ModelChanged("Jev's resolved version changed during the run; run stopped")
             model = got.get("model") or model
             preds.append({"id": recs[i].index, "category": got["category"],
                           "confidence": got["confidence"], "nouls": got.get("nouls", {})})
@@ -831,7 +834,9 @@ def load_exports(paths):
     with tempfile.TemporaryDirectory() as tmp:       # older csv_helpers rewrote their input
         for i, path in enumerate(paths):
             copy = os.path.join(tmp, f"{i}.csv")
-            shutil.copy(path, copy)
+            fd = os.open(copy, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            with open(path, "rb") as src, os.fdopen(fd, "wb") as dst:
+                shutil.copyfileobj(src, dst)
             files.append(load_transactions_from_csv(copy))
     return collapse_within_upload(files)
 
