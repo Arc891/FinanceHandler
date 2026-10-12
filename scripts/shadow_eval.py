@@ -178,6 +178,22 @@ def score_rows(rows, preds):
     return correct
 
 
+def matched_by_category(rows, preds):
+    """Counter of right answers per true category: within a key group, the
+    answers that match the group's categories, credited to the category they
+    matched rather than to the row that happened to hold them."""
+    groups = defaultdict(list)
+    for r in rows:
+        groups[r["group"]].append(r)
+    hit = Counter()
+    for members in groups.values():
+        truths = Counter(r["truth"] for r in members)
+        answers = Counter(c for c in ((preds.get(r["id"]) or {}).get("category") for r in members)
+                          if c is not None)
+        hit.update(truths & answers)
+    return hit
+
+
 def is_flagged(prediction, threshold) -> bool:
     if not prediction or prediction.get("category") is None:
         return True
@@ -233,8 +249,15 @@ def compare(rows, cand, cand_t, sonnet, sonnet_t):
     n = len(rows)
     c_acc = 100 * c_side["correct"] / n if n else 0.0
     s_acc = 100 * s_side["correct"] / n if n else 0.0
-    b = sum(1 for r in rows if c_ok[r["id"]] and not s_ok[r["id"]])
-    c = sum(1 for r in rows if s_ok[r["id"]] and not c_ok[r["id"]])
+    # Pairs per key group: rows sharing a key are interchangeable, so a group
+    # where both arms get k rows right holds no discordant pair.
+    by_group = defaultdict(list)
+    for r in rows:
+        by_group[r["group"]].append(r["id"])
+    b = c = 0
+    for ids in by_group.values():
+        kc, ks = sum(c_ok[i] for i in ids), sum(s_ok[i] for i in ids)
+        b, c = b + max(0, kc - ks), c + max(0, ks - kc)
     p = mcnemar_exact(b, c)
 
     per_month = {}
@@ -244,13 +267,10 @@ def compare(rows, cand, cand_t, sonnet, sonnet_t):
                             "sonnet": _side(sel, sonnet, s_ok, sonnet_t)}
 
     categories = {}
-    by_truth = defaultdict(list)
-    for r in rows:
-        by_truth[r["truth"]].append(r["id"])
-    for cat, ids in by_truth.items():
-        categories[cat] = {"n": len(ids),
-                           "candidate": 100 * sum(c_ok[i] for i in ids) / len(ids),
-                           "sonnet": 100 * sum(s_ok[i] for i in ids) / len(ids)}
+    n_truth = Counter(r["truth"] for r in rows)
+    c_hit, s_hit = matched_by_category(rows, cand), matched_by_category(rows, sonnet)
+    for cat, k in n_truth.items():
+        categories[cat] = {"n": k, "candidate": 100 * c_hit[cat] / k, "sonnet": 100 * s_hit[cat] / k}
 
     bands = {}
     for name, preds, ok in (("candidate", cand, c_ok), ("sonnet", sonnet, s_ok)):

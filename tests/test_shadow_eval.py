@@ -330,3 +330,29 @@ def test_report_cli_end_to_end(tmp_path, capsys):
     out = capsys.readouterr().out
     assert code == 0
     assert "laya" in out and "switch" in out
+
+
+# ── shared key groups: categories and pairs (review 2026-10-12) ─────────────
+
+def test_a_group_match_is_credited_to_the_category_it_matched():
+    # truths A and B share a key; the one right answer is B, given on A's row
+    rows = [row(0, "A", group=7), row(1, "B", group=7)]
+    cand = {0: pred("B"), 1: pred("X")}
+    res = se.compare(rows, cand, 0.0, cand, 0.0)
+    assert res["categories"]["A"]["candidate"] == 0.0
+    assert res["categories"]["B"]["candidate"] == 100.0
+
+
+def test_a_group_both_arms_get_one_right_in_is_not_discordant():
+    rows = [row(0, "A", group=7), row(1, "B", group=7)]
+    cand = {0: pred("X"), 1: pred("A")}
+    sonnet = {0: pred("A"), 1: pred("X")}
+    res = se.compare(rows, cand, 0.0, sonnet, 0.0)
+    assert res["discordant"] == (0, 0)
+
+
+def test_single_row_groups_pair_as_before():
+    rows = [row(0, "A"), row(1, "B"), row(2, "C")]
+    cand = {0: pred("A"), 1: pred("B"), 2: pred("X")}
+    sonnet = {0: pred("A"), 1: pred("X"), 2: pred("C")}
+    assert se.compare(rows, cand, 0.0, sonnet, 0.0)["discordant"] == (1, 1)
