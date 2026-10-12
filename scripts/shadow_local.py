@@ -116,6 +116,11 @@ def masked(logits, classes, allowed):
 
 # ── the run ─────────────────────────────────────────────────────────────────
 
+def _close(model):
+    if hasattr(model, "close"):
+        model.close()
+
+
 def run_arm(rows, make_model, split_kind, folds=FOLDS):
     """({id: {"category", "confidence"}} for every routed row, info).
 
@@ -139,6 +144,7 @@ def run_arm(rows, make_model, split_kind, folds=FOLDS):
         model = make_model()
         model.fit(fit_rows)
         classes, logits = model.logits(held)
+        _close(model)
         oof += [(r, classes, masked(lg, classes, allowed[r["block"]])) for r, lg in zip(held, logits)]
 
     cal_logits, cal_gold = [], []
@@ -157,6 +163,7 @@ def run_arm(rows, make_model, split_kind, folds=FOLDS):
     model = make_model()
     model.fit(train)
     classes, logits = model.logits(test_routed)
+    _close(model)
     for r, lg in zip(test_routed, logits):
         preds[r["id"]] = answer(classes, masked(lg, classes, allowed[r["block"]]))
     info = {"temperature": temperature, "train_rows": len(train), "calibration_rows": len(cal_gold),
@@ -205,6 +212,7 @@ def main(argv=None) -> int:
     parser.add_argument("--out-dir", required=True)
     parser.add_argument("--splits", default=",".join(se.SPLITS))
     parser.add_argument("--device", default="cuda", help="laya: cuda or cpu")
+    parser.add_argument("--base", help="laya: the downloaded base checkpoint (see shadow_laya.py)")
     parser.add_argument("--epochs", type=int, default=4, help="laya: fine-tune epochs")
     args = parser.parse_args(argv)
     if args.arm not in ARMS:
@@ -218,7 +226,15 @@ def main(argv=None) -> int:
     if header.get("kind") != "export":
         print("stopped: not an export file (eval_categoriser.py --export-out)")
         return 2
-    make_model = ARMS[args.arm](args)
+    if args.arm == "laya" and not args.base:
+        print("stopped: laya needs --base, the downloaded checkpoint (see shadow_laya.py)")
+        return 2
+    try:
+        make_model = ARMS[args.arm](args)
+    except Exception as exc:                    # noqa: BLE001 - NotIsolated and import errors
+        print(f"stopped: {type(exc).__name__}: {exc}" if type(exc).__name__ == "NotIsolated"
+              else f"stopped: {type(exc).__name__} while preparing the {args.arm} arm")
+        return 2
     print(f"export: {len(rows)} rows, {sum(1 for r in rows if r['routed'])} routed, "
           f"{len({r['label'] for r in rows})} months")
     for split in args.splits.split(","):
