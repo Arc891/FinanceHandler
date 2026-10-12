@@ -60,6 +60,14 @@ image's config and service account are used as they are):
         --src /tmp/eval/src --local-rules /tmp/eval/local_rules.tsv \\
         --account-roles /tmp/eval/account_roles.txt \\
         --export-out /tmp/eval/export.jsonl /tmp/eval/*.csv
+    # Hosted Jev (arm 2; jev_client.py next to this script too): rules only,
+    # then one zero-data-retention decision per routed row on the anonymised
+    # text. The key file is placed with token-place and never printed.
+    docker exec finance-automation-bot python /tmp/eval/eval_categoriser.py \\
+        --src /tmp/eval/src --local-rules /tmp/eval/local_rules.tsv \\
+        --account-roles /tmp/eval/account_roles.txt \\
+        --openrouter-key-file /tmp/eval/openrouter.key \\
+        --jev-out /tmp/eval/pred-jev.jsonl /tmp/eval/*.csv
     # afterwards, remove the exports from both places
     docker exec finance-automation-bot rm -rf /tmp/eval
     rm -rf /tmp/eval
@@ -703,6 +711,111 @@ def export_payload(m, results, roles=None):
     return fp, rows
 
 
+def jev_payload(m, results, ask, expense_criteria, income_criteria, say=lambda *_: None):
+    """(predictions, model) for the routed rows, one Jev decision each.
+
+    The state is what Sonnet's prompt holds for the row, anonymised the same
+    way within its month: date, type, amount, counterparty, the first 80
+    characters of the description and the pot hint, plus the rule-decided
+    rows of the same counterparty in that month with their categories.
+    """
+    from automation.data_anonymizer import anonymize_batch_for_ai
+    from finance_core import tx_features as tf
+    from finance_core.pot_links import pot_hints
+    savings = set(tf.account_roles().get("savings", []))
+    by_label = defaultdict(list)
+    for r in m.records:
+        by_label[r.label].append(r)
+    preds, model, asked = [], None, 0
+    total = sum(1 for r in m.records if _is_routed(results[r.index]))
+    for label in sorted(by_label, key=_label_key):
+        recs = by_label[label]
+        anon, _ = anonymize_batch_for_ai([r.tx for r in recs])
+        routed = [i for i, r in enumerate(recs) if _is_routed(results[r.index])]
+        hints = pot_hints([r.tx for r in recs], routed, savings) if savings else {}
+        for i in routed:
+            a = anon[i]
+            kind = "INCOME" if a.get("credit_debit_indicator") == "CRDT" else "EXPENSE"
+            context = [{"type": "INCOME" if anon[j].get("credit_debit_indicator") == "CRDT" else "EXPENSE",
+                        "amount_eur": round(float(anon[j].get("transaction_amount") or 0), 2),
+                        "category": results[recs[j].index].category}
+                       for j in range(len(recs))
+                       if j not in routed and anon[j].get("creditor") == a.get("creditor")]
+            state = {"transaction": {
+                "date": a.get("booking_date", ""), "type": kind,
+                "amount_eur": round(float(a.get("transaction_amount") or 0), 2),
+                "counterparty": a.get("creditor", ""),
+                "description": (a.get("remittance_information") or "")[:80],
+                "hint": hints.get(i, "-")},
+                "same_counterparty_this_month": context}
+            block = recs[i].group[3]
+            got = ask(state, jev_questions(income_criteria if block == "income" else expense_criteria))
+            model = got.get("model") or model
+            preds.append({"id": recs[i].index, "category": got["category"],
+                          "confidence": got["confidence"], "nouls": got.get("nouls", {})})
+            asked += 1
+            if asked % 100 == 0:
+                say(f"  jev: {asked}/{total} rows")
+    return preds, model
+
+
+def jev_questions(criteria):
+    import jev_client
+    return jev_client.questions(criteria)
+
+
+def jev_criteria():
+    """Per block, {category: description} from the category lists and the
+    example rules Sonnet's prompt shows (the first 30)."""
+    import jev_client
+    from automation.ai_categorizer import get_example_rules_for_ai
+    from constants import CATEGORIZATION_RULES_EXPENSE, CATEGORIZATION_RULES_INCOME
+    from finance_core.categorization_engine import ai_category_options
+    expense, income = ai_category_options()
+    examples = dict(list(get_example_rules_for_ai(
+        {**CATEGORIZATION_RULES_EXPENSE, **CATEGORIZATION_RULES_INCOME}).items())[:30])
+    return (jev_client.category_descriptions(list(expense), examples),
+            jev_client.category_descriptions(list(income), examples))
+
+
+def read_key(path):
+    if path:
+        try:
+            with open(path, encoding="utf-8") as f:
+                key = f.read().strip()
+        except FileNotFoundError:
+            raise InputError("the OpenRouter key file does not exist") from None
+    else:
+        key = os.environ.get("OPENROUTER_API_KEY", "").strip()
+    if not key:
+        raise InputError("no OpenRouter key (--openrouter-key-file or OPENROUTER_API_KEY)")
+    return key
+
+
+def run_jev(args, m, local_rules, say):
+    import jev_client
+    key = read_key(args.openrouter_key_file)
+    session = jev_client.new_session()
+    if not jev_client.zdr_ok(session):
+        raise InputError("Jev 1.13 at TypeSafe is not on OpenRouter's zero data retention list; "
+                         "nothing was sent")
+    say("")
+    say("zero data retention confirmed for typesafe/jev-1.13 at TypeSafe")
+    results = asyncio.run(categorise(rules_engine(local_rules), m.records, None, lambda *_: None))
+    expense, income = jev_criteria()
+    try:
+        preds, model = jev_payload(m, results, lambda st, qs: jev_client.decide(session, key, st, qs),
+                                   expense, income, say)
+    except jev_client.JevError as exc:
+        raise InputError(str(exc)) from None
+    fp, _ = rows_payload(m, results)
+    say(f"jev answered {sum(1 for p in preds if p['category'])} of {len(preds)} routed rows "
+        f"(model {model})")
+    write_shadow_file(args.jev_out, "predictions", fp, preds, say, arm="jev", split="any",
+                      local=False, model=model)
+    return 0
+
+
 def write_shadow_file(path, kind, fp, rows, say, **extra):
     from shadow_eval import write_private_jsonl
     write_private_jsonl(path, {"kind": kind, **extra, "fingerprint": fp}, rows)
@@ -783,6 +896,8 @@ def run(args, counter):
             rc.write_draft(cov, args.draft_out)
             say(f"draft written to {args.draft_out} (not shown)")
         return 0
+    if args.jev_out:
+        return run_jev(args, m, local_rules, say)
     if args.export_out:
         results = asyncio.run(categorise(rules_engine(local_rules), m.records, None, lambda *_: None))
         fp, rows = export_payload(m, results)
@@ -863,6 +978,11 @@ def main(argv=None) -> int:
     parser.add_argument("--export-out", metavar="PATH",
                         help="shadow-eval: rules only, no AI; write every scored row with its "
                              "text for the local arms (0600, never printed; owner-run)")
+    parser.add_argument("--jev-out", metavar="PATH",
+                        help="shadow-eval: rules only, then hosted Jev on the routed rows (ZDR checked "
+                             "first); write its answers here (0600)")
+    parser.add_argument("--openrouter-key-file", metavar="PATH",
+                        help="with --jev-out: the OpenRouter key (default: OPENROUTER_API_KEY)")
     parser.add_argument("--debug", action="store_true",
                         help="show tracebacks; may print row content")
     args = parser.parse_args(argv)
@@ -870,6 +990,8 @@ def main(argv=None) -> int:
         parser.error("--amount-cuts works with --rules only")
     if args.export_out and (args.rules or args.dry_run or args.predictions_out):
         parser.error("--export-out runs the rules alone; not with --rules, --dry-run or --predictions-out")
+    if args.jev_out and (args.rules or args.dry_run or args.predictions_out or args.export_out):
+        parser.error("--jev-out runs alone; not with --rules, --dry-run, --predictions-out or --export-out")
     if args.predictions_out and (args.rules or args.dry_run):
         parser.error("--predictions-out needs an AI run")
     if args.src:
