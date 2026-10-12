@@ -2531,8 +2531,40 @@ measures them on months where the right answer is already known.
     a rule cannot decide (Cadeautjes bought at a grocery shop): those rows
     stay with the AI or the user. The mirror counts show whether linking
     Uit spaarpotje to its pot transfer can be deterministic.
-- Later, in its own session: a local model or Jev, scored with the same
-  script (`/home/wsl/Coding/jev-investigation.md`).
+- **Shadow-eval, 2026-10-12** (`/home/wsl/Coding/jev-investigation.md`
+  §5.1 step 1, criteria pre-registered in its §5.3; branch
+  `feat/shadow-eval`): candidates against Sonnet on the 688 of 1,918 rows
+  today's rules (regex, 33 local rules, account roles) send to the AI.
+  - Harness: `eval_categoriser.py --rows-out --predictions-out` (Sonnet),
+    `--export-out` (training export, workstation only), `--jev-out`;
+    `shadow_eval.py` scores; `shadow_local.py` and `shadow_laya.py` train
+    the local arms. Two month splits: alternating (train 10, test 9) and
+    forward (train 06/2024-08/2025, test 09/2025-12/2025; decides when
+    they disagree). Each candidate's threshold is fitted on the train
+    months to Sonnet's wrong-unflagged count there; Sonnet stays at 0.75.
+    Every run needs the same `--map` list (2026-09-25) and exports, or
+    the report refuses its file.
+  - Sonnet, one run, all months: 320/688 = 46.5 % on the AI rows; on the
+    test months 148/340 = 43.5 % (alternating) and 60/114 = 52.6 %
+    (forward).
+  - Test-month accuracy, candidate vs Sonnet, and the verdict:
+
+    | Arm | Alternating | Forward | Verdict |
+    |---|---|---|---|
+    | Classical (logistic regression on row features) | 43.8 % vs 43.5 % | 38.6 % vs 52.6 % | no-switch (alternating alone: Tier-0 option) |
+    | Laya multilingual, fine-tuned (12 epochs chosen on train months) | 38.8 % vs 43.5 % | 36.0 % vs 52.6 % | no-switch |
+    | Jev 1.13, hosted, ZDR (`typesafe/jev-1.13-20260917`) | 30.9 % vs 43.5 % | 36.8 % vs 52.6 % | no-switch |
+
+    No arm passes (c) on either split; the forward split fails (a) or
+    (b) for every arm. A first Laya run (4 epochs) was undertrained
+    (28.5 % / 15.8 %) and replaced by the run above.
+  - **Outcome: Sonnet stays.** Nothing changes in production. The local
+    arms do not beat it even with the household's labels and raw text.
+    Every arm stays low on Cadeautjes and Ander; the local arms gain on
+    Boodschappen and Uit spaarpotje but lose more on Dates/uitjes and
+    Auto / vervoer / OV.
+  - On the workstation only: `~/finance-eval/` (export, predictions,
+    `report-3.txt`, all 0600). The Pi's `/tmp/eval` is removed.
 
 **Phase 4, tools, docs, cutover** (in this order)
 
