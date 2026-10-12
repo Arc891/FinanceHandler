@@ -39,6 +39,15 @@ class NotIsolated(Exception):
 
 
 def network_isolated() -> bool:
+    """True only inside an empty network namespace (`unshare -rn`): loopback
+    is the only interface and a known address cannot be reached. A firewall
+    that blocks one address is not isolation."""
+    try:
+        names = {name for _, name in socket.if_nameindex()}
+    except OSError:
+        return False
+    if names - {"lo"}:
+        return False
     try:
         socket.create_connection(("1.1.1.1", 443), timeout=3).close()
     except OSError:
@@ -71,21 +80,23 @@ class LayaModel:
         self.options = {b: sorted(v) for b, v in from_blocks.items()}
         self.dir = tempfile.mkdtemp(prefix="laya-", dir=self.workdir)       # 0700
         data = os.path.join(self.dir, "train.jsonl")
-        fd = os.open(data, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            for r in rows:
-                f.write(json.dumps({"state": sl.row_text(r["tx"]),
-                                    "questions": question(self.options[r["block"]]),
-                                    "expected": {"category": r["truth"]}}, ensure_ascii=False) + "\n")
         try:
-            from laya.train import TrainConfig
-        except ImportError:                      # the fakes in the tests
-            from types import SimpleNamespace as TrainConfig
-        try:
+            fd = os.open(data, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                for r in rows:
+                    f.write(json.dumps({"state": sl.row_text(r["tx"]),
+                                        "questions": question(self.options[r["block"]]),
+                                        "expected": {"category": r["truth"]}}, ensure_ascii=False) + "\n")
+            try:
+                from laya.train import TrainConfig
+            except ImportError:                      # the fakes in the tests
+                from types import SimpleNamespace as TrainConfig
             self._finetune(data, self.base, os.path.join(self.dir, "ckpt"),
-                           config=TrainConfig(epochs=self.epochs, grad_accum=self.grad_accum, seed=0), device=self.device)
+                           config=TrainConfig(epochs=self.epochs, grad_accum=self.grad_accum, seed=0),
+                           device=self.device)
         finally:
-            os.remove(data)
+            if os.path.exists(data):
+                os.remove(data)
         self.agent = self._load(os.path.join(self.dir, "ckpt"), device=self.device)
 
     def logits(self, rows):

@@ -118,3 +118,54 @@ def test_the_setting_reaches_the_training_config(tmp_path):
     model.grad_accum = 1
     model.fit(export_rows())
     assert seen[-1]["config"].grad_accum == 1
+
+
+# ── fail closed (review 2026-10-12) ─────────────────────────────────────────
+
+def _no_route(*a, **k):
+    raise OSError("unreachable")
+
+
+def test_isolated_means_loopback_only_and_no_route(monkeypatch):
+    monkeypatch.setattr(sla.socket, "if_nameindex", lambda: [(1, "lo")])
+    monkeypatch.setattr(sla.socket, "create_connection", _no_route)
+    assert sla.network_isolated()
+
+
+def test_another_interface_is_not_isolated_even_when_one_address_is_blocked(monkeypatch):
+    monkeypatch.setattr(sla.socket, "if_nameindex", lambda: [(1, "lo"), (2, "eth0")])
+    monkeypatch.setattr(sla.socket, "create_connection", _no_route)
+    assert not sla.network_isolated()
+
+
+def test_a_reachable_address_is_not_isolated(monkeypatch):
+    class Conn:
+        def close(self):
+            pass
+    monkeypatch.setattr(sla.socket, "if_nameindex", lambda: [(1, "lo")])
+    monkeypatch.setattr(sla.socket, "create_connection", lambda *a, **k: Conn())
+    assert not sla.network_isolated()
+
+
+def test_a_failed_write_leaves_no_training_file(tmp_path):
+    model = make(tmp_path, [])
+    rows = export_rows()
+    rows[-1]["truth"] = {"not", "json"}                # json.dumps fails on the last line
+    with pytest.raises(TypeError):
+        model.fit(rows)
+    model.close()
+    assert os.listdir(tmp_path) == []
+
+
+def test_a_failed_fit_leaves_no_training_file(tmp_path):
+    def finetune(data, model_dir, output_dir, config=None, device=None):
+        os.makedirs(output_dir)
+        raise RuntimeError("out of memory")
+    model = sla.LayaModel(base="/m", device="cuda", epochs=1, workdir=str(tmp_path), finetune=finetune,
+                          load=lambda *a, **k: None)
+    with pytest.raises(RuntimeError):
+        model.fit(export_rows())
+    files = [f for _, _, fs in os.walk(tmp_path) for f in fs]
+    assert not any(f.endswith(".jsonl") for f in files)
+    model.close()
+    assert os.listdir(tmp_path) == []

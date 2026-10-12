@@ -130,9 +130,11 @@ def _out_of_fold(train, make_model, fold_of, allowed):
         if not fit_rows or not held:
             continue
         model = make_model()
-        model.fit(fit_rows)
-        classes, logits = model.logits(held)
-        _close(model)
+        try:
+            model.fit(fit_rows)
+            classes, logits = model.logits(held)
+        finally:
+            _close(model)
         oof += [(r, classes, masked(lg, classes, allowed[r["block"]])) for r, lg in zip(held, logits)]
     return oof
 
@@ -182,9 +184,11 @@ def run_arm(rows, make_model, split_kind, folds=FOLDS):
 
     preds = {r["id"]: answer(classes, lg) for r, classes, lg in oof if r["routed"]}
     model = candidates[chosen]()
-    model.fit(train)
-    classes, logits = model.logits(test_routed)
-    _close(model)
+    try:
+        model.fit(train)
+        classes, logits = model.logits(test_routed)
+    finally:
+        _close(model)
     for r, lg in zip(test_routed, logits):
         preds[r["id"]] = answer(classes, masked(lg, classes, allowed[r["block"]]))
     info = {"temperature": temperature, "train_rows": len(train), "calibration_rows": len(cal_gold),
@@ -273,7 +277,11 @@ def main(argv=None) -> int:
     print(f"export: {len(rows)} rows, {sum(1 for r in rows if r['routed'])} routed, "
           f"{len({r['label'] for r in rows})} months")
     for split in args.splits.split(","):
-        preds, info = run_arm(rows, make_model, split)
+        try:
+            preds, info = run_arm(rows, make_model, split)
+        except Exception as exc:                # noqa: BLE001 - its message may quote a row
+            print(f"stopped: {type(exc).__name__} in the {split} split of the {args.arm} arm")
+            return 2
         name = args.name or args.arm
         path = os.path.join(args.out_dir, f"pred-{name}-{split}.jsonl")
         extra = {} if info["chosen"] == "default" else {"setting": info["chosen"]}

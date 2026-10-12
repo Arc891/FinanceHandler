@@ -244,3 +244,32 @@ def test_parse_laya_settings():
     assert sl.parse_settings("4x8,12x1") == [(4, 8), (12, 1)]
     with pytest.raises(ValueError):
         sl.parse_settings("4,8")
+
+
+# ── cleanup and quiet failures (review 2026-10-12) ──────────────────────────
+
+class Boom(MemoModel):
+    closed = 0
+
+    def logits(self, rows):
+        raise ValueError(SECRET)
+
+    def close(self):
+        Boom.closed += 1
+
+
+def test_a_model_that_fails_is_still_closed():
+    Boom.closed = 0
+    with pytest.raises(ValueError):
+        sl.run_arm(export_rows(), Boom, "alternating")
+    assert Boom.closed == 1
+
+
+def test_a_failing_arm_stops_with_its_type_only(tmp_path, capsys, monkeypatch):
+    export = tmp_path / "export.jsonl"
+    se.write_private_jsonl(str(export), {"kind": "export", "fingerprint": "f" * 16}, export_rows())
+    monkeypatch.setitem(sl.ARMS, "boom", lambda args: Boom)
+    assert sl.main(["boom", "--export", str(export), "--out-dir", str(tmp_path)]) == 2
+    captured = capsys.readouterr()
+    assert "ValueError" in captured.out
+    assert SECRET not in captured.out + captured.err
