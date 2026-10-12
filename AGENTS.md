@@ -106,6 +106,9 @@ All scripts run from the project root with `venv/bin/python scripts/<name>.py`; 
 | `add_income_placeholder.py` | One-off, done: wrote `! Nog in te delen !` into `Summary!H35` of the template and the 2026 months |
 | `sandbox_check.py`, `time_ai_chunk.py` | Live Google check on a synthetic month; AI chunk timing |
 | `repair_months.py` | Structure-only dry run for the known 2026 layout repairs; `--apply` after review |
+| `shadow_eval.py` | Shadow-eval report: candidates against Sonnet on the AI-routed rows, two month splits, the pre-registered checks of `~/Coding/jev-investigation.md` §5.3; reads the rows and predictions files `eval_categoriser.py` writes with `--rows-out`, `--predictions-out`, `--jev-out` |
+| `shadow_local.py`, `shadow_laya.py` | Workstation-only arms (classical, fine-tuned Laya) from the owner-run `--export-out` file; `venv-eval` with `requirements-eval.txt`; Laya runs inside `unshare -rn` |
+| `jev_client.py` | Hosted Jev through OpenRouter for the shadow-eval: pinned model, ZDR checked before a run |
 | `backfill_notes.py` | Counts-only dry run for 06-10/2026 historical description notes; private matching and `--apply` are owner-run |
 
 ## Architecture Overview
