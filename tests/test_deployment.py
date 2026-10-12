@@ -86,3 +86,37 @@ def test_force_rebuild_warns_that_the_prune_can_remove_the_rollback_image():
     block = block[:block.index("fi\n")]
     assert "docker tag" in block and block.index("docker tag") < block.index("docker system prune")
     assert "data/" in block        # the bind-mounted data survives the prune
+
+
+# ── the real user behind the deploy (its ~/.scripts and claude CLI mount) ──
+
+def resolve_real_user(sudo_user, script):
+    """Run run.sh's resolve_real_user function alone, with SUDO_USER set."""
+    import subprocess
+    func = re.search(r"^resolve_real_user\(\) \{\n.*?^\}\n", run_sh(), re.S | re.M)
+    assert func, "run.sh defines resolve_real_user"
+    env = {k: v for k, v in os.environ.items() if k != "SUDO_USER"}
+    if sudo_user is not None:
+        env["SUDO_USER"] = sudo_user
+    out = subprocess.run(["bash", "-c", func.group(0) + 'resolve_real_user "$1"', "-", script],
+                         env=env, capture_output=True, text=True, check=True)
+    return out.stdout.strip()
+
+
+def test_sudo_from_a_user_resolves_to_that_user(tmp_path):
+    assert resolve_real_user("pi", str(tmp_path)) == "pi"
+
+
+def test_sudo_from_a_root_shell_falls_back_to_the_script_owner(tmp_path):
+    # `sudo ./run.sh` inside `sudo -i` sets SUDO_USER=root, which mounted
+    # root's claude CLI into the bot (2026-10-12); the repo owner is meant.
+    import pwd
+    owner = pwd.getpwuid(os.stat(tmp_path).st_uid).pw_name
+    assert resolve_real_user("root", str(tmp_path)) == owner
+
+
+def test_no_sudo_falls_back_to_the_script_owner(tmp_path):
+    import pwd
+    owner = pwd.getpwuid(os.stat(tmp_path).st_uid).pw_name
+    assert resolve_real_user(None, str(tmp_path)) == owner
+    assert resolve_real_user("", str(tmp_path)) == owner

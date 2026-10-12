@@ -22,7 +22,16 @@ done
 # (HOME would be /root, and SUDO_USER would be empty). We fall back to the
 # owner of this script, since the repo lives under that user's home. This is
 # used for both ~/.scripts and the ~/.local/bin/claude mount below.
-REAL_USER="${SUDO_USER:-$(stat -c '%U' "$0")}"
+# SUDO_USER=root (sudo from a root shell) counts as no sudo: it would mount
+# root's claude CLI, which the container's user cannot run.
+resolve_real_user() {
+  if [[ -n "${SUDO_USER:-}" && "$SUDO_USER" != "root" ]]; then
+    echo "$SUDO_USER"
+  else
+    stat -c '%U' "$1"
+  fi
+}
+REAL_USER="$(resolve_real_user "$0")"
 REAL_HOME="$(getent passwd "$REAL_USER" | cut -d: -f6)"
 REAL_HOME="${REAL_HOME:-$HOME}"
 
