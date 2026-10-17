@@ -173,6 +173,13 @@ ASN Bank export with the columns Date, Account IBAN, Counterparty IBAN,
 Counterparty Name, Transaction Amount, Currency, Transaction Code and Remittance
 Information. The uploaded file is never changed.
 
+## Backlog age
+
+`src/cli.py age` tells how many days ago the last statement was imported and how
+many rows open runs still have to write; `--json` gives the one-line form the
+weekly digest reads. It runs with the system `python3` and needs no venv, Docker
+or config. Details and the data source: [docs/ingest-notes.md](docs/ingest-notes.md).
+
 ## When something goes wrong
 
 - A run stopped halfway: `/status`, then `/resume`. A write that failed is

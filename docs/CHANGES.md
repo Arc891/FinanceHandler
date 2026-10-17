@@ -2,6 +2,8 @@
 
 ## Recent Changes
 
+- 2026-10-17: `src/cli.py age [--json]` reports the backlog age (days since the last complete run, rows pending in open runs) for the weekly digest, without Discord or a venv; see `docs/ingest-notes.md`.
+
 ### Multi-Month Upload (2026-09-27; release follow-up 2026-09-28)
 
 Design and work log: `docs/plans/MULTI_MONTH_UPLOAD_PLAN.md`.
