@@ -76,10 +76,15 @@ def backlog_age(runs_dir=None, ledger_path=None, now: Optional[datetime] = None
     """
     from zoneinfo import ZoneInfo
 
-    tz = ZoneInfo(TZ_NAME)
     now = now or datetime.now(timezone.utc)
     try:
-        runs = RunStore(runs_dir).all_runs()
+        tz = ZoneInfo(TZ_NAME)  # a host without tzdata is unreadable state, not a crash
+        store = RunStore(runs_dir)
+        try:
+            os.listdir(store.directory)  # glob swallows EACCES; a missing dir stays null/0
+        except FileNotFoundError:
+            pass
+        runs = store.all_runs()
         pending = 0
         complete = []
         for run in runs:

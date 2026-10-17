@@ -256,6 +256,48 @@ def test_unreadable_run_file_prints_nulls_and_exits_zero(tmp_path, capsys):
     assert "broken" not in out and str(tmp_path) not in out
 
 
+def test_unreadable_runs_dir_prints_nulls_and_exits_zero(tmp_path, capsys):
+    if hasattr(os, "geteuid") and os.geteuid() == 0:
+        pytest.skip("root can list a mode-0 directory")
+    runs = tmp_path / "runs"
+    write_run(runs, "good", closed="complete", closed_at="2026-10-10T08:00:00+00:00")
+    assert_fixture(runs)
+
+    runs.chmod(0)
+    try:
+        code, out, err = run_age(tmp_path, capsys)
+        assert code == 0
+        assert out == '{"days_since_last_statement": null, "pending_review_rows": null}\n'
+        assert err == "finance age: unreadable run state\n"
+        assert str(tmp_path) not in err and "Traceback" not in err
+
+        code, out, err = run_age(tmp_path, capsys, json_out=False)
+        assert code == 0
+        assert out == "backlog age unknown: run state unreadable\n"
+        assert err == "finance age: unreadable run state\n"
+    finally:
+        runs.chmod(0o755)
+
+
+def test_missing_tzdata_prints_nulls_and_exits_zero(tmp_path, capsys, monkeypatch):
+    import zoneinfo
+
+    def no_tzdata(key):
+        raise zoneinfo.ZoneInfoNotFoundError(f"No time zone found with key {key}")
+
+    monkeypatch.setattr(zoneinfo, "ZoneInfo", no_tzdata)
+    runs = tmp_path / "runs"
+    write_run(runs, "good", closed="complete", closed_at="2026-10-10T08:00:00+00:00")
+    assert_fixture(runs)
+
+    code, out, err = run_age(tmp_path, capsys)
+
+    assert code == 0
+    assert out == '{"days_since_last_statement": null, "pending_review_rows": null}\n'
+    assert err == "finance age: unreadable run state\n"
+    assert "Traceback" not in err
+
+
 def test_plain_output_never_shows_ids_files_or_rows(tmp_path, capsys):
     runs = tmp_path / "runs"
     write_run(runs, "upload-SECRETID", closed="complete", closed_at="2026-10-10T08:00:00+00:00")
