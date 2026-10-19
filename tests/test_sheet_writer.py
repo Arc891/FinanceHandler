@@ -215,11 +215,12 @@ def test_no_sort_inside_append():
     assert len(sh.transactions.updates()) == 1
 
 
-def test_write_that_lands_then_raises_is_not_retried():
+def test_write_that_lands_then_raises_is_not_retried(tmp_path):
     sh = sheet()
     sh.transactions.update_faults = [("after", Http503())]
     with pytest.raises(Http503):
-        commit_append(sh, EXPENSES, [expense_tx()])
+        commit_append(sh, EXPENSES, [expense_tx()],
+                      failed_path=tmp_path / "failed_uploads.json")
     assert len(sh.transactions.updates()) == 1
     assert len([t for t in read_block(sh, EXPENSES).tuples if t]) == 1     # present exactly once
 

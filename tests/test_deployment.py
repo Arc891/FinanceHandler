@@ -13,6 +13,7 @@ change needs a restart rather than a rebuild, and warns before
 import importlib.util
 import os
 import re
+from unittest import mock
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RETIRED = ("GSHEET_TAB", "GSHEET_EXPENSE_START_ROW", "GSHEET_INCOME_START_ROW", "APPROVAL_CHANNEL_ID",
@@ -24,7 +25,9 @@ def example():
     path = os.path.join(ROOT, "src", "config", "config_settings.example.py")
     spec = importlib.util.spec_from_file_location("example_cfg", path)
     mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
+    # The example creates its data directories on import; these tests only read its names.
+    with mock.patch.object(os, "makedirs"):
+        spec.loader.exec_module(mod)
     return mod
 
 

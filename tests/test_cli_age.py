@@ -76,6 +76,32 @@ def test_json_has_exactly_the_two_contract_keys(tmp_path, capsys):
     assert lines[0] == '{"days_since_last_statement": 7, "pending_review_rows": 0}'
 
 
+def test_production_path_reads_settings_paths(tmp_path, capsys, monkeypatch):
+    from finance_core import ledger, run_state
+
+    runs = tmp_path / "runs"
+    ledger_path = tmp_path / "upload_ledger.json"
+    write_run(runs, "u1", closed="complete", closed_at="2026-10-10T08:00:00+00:00")
+    write_ledger(ledger_path, {})
+    requested = []
+
+    def setting(name, default=None):
+        requested.append(name)
+        return {"RUNS_DIR": str(runs), "UPLOAD_LEDGER_PATH": str(ledger_path)}[name]
+
+    # Patch the imported accessors so no real config module is ever loaded.
+    monkeypatch.setattr(run_state, "setting", setting)
+    monkeypatch.setattr(ledger, "setting", setting)
+
+    code = cli.main(["age", "--json"], now=NOW)
+    out, err = capsys.readouterr()
+
+    assert code == 0
+    assert err == ""
+    assert out == '{"days_since_last_statement": 7, "pending_review_rows": 0}\n'
+    assert requested == ["RUNS_DIR", "UPLOAD_LEDGER_PATH"]
+
+
 def test_fresh_run_reports_days_since_newest_complete_run(tmp_path, capsys):
     runs = tmp_path / "runs"
     # started order differs from closed order: the newest close wins

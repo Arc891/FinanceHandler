@@ -534,17 +534,30 @@ def test_self_check_requires_the_new_keys():
     assert "APPROVAL_CHANNEL_ID" not in config_check.REQUIRED_SETTINGS
 
 
-def test_the_example_config_passes_the_self_check(monkeypatch):
+def test_the_example_config_passes_the_self_check(monkeypatch, tmp_path):
     """A fresh copy of the example must start; it defines every key."""
     import importlib.util
     path = os.path.join(os.path.dirname(os.path.dirname(__file__)),
                         "src", "config", "config_settings.example.py")
     spec = importlib.util.spec_from_file_location("example_cfg", path)
     mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
+    created = []
+
+    def temporary_makedirs(directory, exist_ok=False):
+        relative = os.path.relpath(directory, os.path.dirname(os.path.dirname(__file__)))
+        destination = tmp_path / relative
+        created.append(destination)
+        destination.mkdir(parents=True, exist_ok=exist_ok)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "makedirs", temporary_makedirs)
+        spec.loader.exec_module(mod)
     missing = [k for k in config_check.REQUIRED_SETTINGS
                if not hasattr(mod, k)]
     assert missing == []
+    assert len(created) == 3
+    assert all(directory.is_dir() and directory.is_relative_to(tmp_path)
+               for directory in created)
 
 
 def test_bot_runs_the_self_check_before_any_config_import():
