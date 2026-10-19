@@ -26,6 +26,13 @@ def _data_snapshot(directory):
     return entries
 
 
+def changed_data_paths(directory, before):
+    """Paths added, changed or removed since ``before``, by stat information only."""
+    after = _data_snapshot(directory)
+    return [str(directory / name) for name in sorted(before.keys() | after.keys())
+            if before.get(name) != after.get(name)]
+
+
 @contextmanager
 def guard_data_directory(directory):
     """Fail on added, changed or removed paths, using stat information only."""
@@ -33,15 +40,24 @@ def guard_data_directory(directory):
     try:
         yield
     finally:
-        after = _data_snapshot(directory)
-        changed = sorted(name for name in before.keys() | after.keys()
-                         if before.get(name) != after.get(name))
+        changed = changed_data_paths(directory, before)
         if changed:
-            paths = [str(directory / name) for name in changed]
-            pytest.fail("Tests changed repository data paths:\n" + "\n".join(paths))
+            pytest.fail("Tests changed repository data paths:\n" + "\n".join(changed))
 
 
-@pytest.fixture(scope="session", autouse=True)
-def no_repository_data_writes():
-    with guard_data_directory(Path(__file__).resolve().parents[1] / "data"):
-        yield
+DATA = Path(__file__).resolve().parents[1] / "data"
+
+
+def pytest_sessionstart(session):
+    # Before collection, so a test module that writes at import time is caught too.
+    session.config._data_before = _data_snapshot(DATA)
+
+
+def pytest_sessionfinish(session, exitstatus):
+    changed = changed_data_paths(DATA, session.config._data_before)
+    if changed:
+        reporter = session.config.pluginmanager.get_plugin("terminalreporter")
+        reporter.write_line("Tests changed repository data paths:", red=True)
+        for path in changed:
+            reporter.write_line(path, red=True)
+        session.exitstatus = pytest.ExitCode.TESTS_FAILED
