@@ -5,9 +5,7 @@ Phase 0 of docs/plans/MULTI_MONTH_UPLOAD_PLAN.md. Multi-file and attachment
 tests join this module in Phase 3.
 """
 
-import pytest
-
-from config.spaarpot_uuid_map import SPAARPOT_UUID_MAP
+from finance_core import csv_helper
 from finance_core.csv_helper import load_transactions_from_csv, normalize_csv_data
 
 from csv_rows import asn_row, write_csv
@@ -49,9 +47,9 @@ def test_empty_lines_are_tolerated(tmp_path):
     assert len(load_transactions_from_csv(str(path))) == 1
 
 
-@pytest.mark.skipif(not SPAARPOT_UUID_MAP, reason="no spaarpot mapping configured")
-def test_spaarpot_reference_is_still_mapped(tmp_path):
-    uuid, name = next(iter(SPAARPOT_UUID_MAP.items()))
+def test_spaarpot_reference_is_still_mapped(tmp_path, monkeypatch):
+    uuid, name = "12345678-1234-5678-1234-567812345678", "Testpot"
+    monkeypatch.setattr(csv_helper, "SPAARPOT_UUID_MAP", {uuid: name})
     path = write_csv(tmp_path / "export.csv", [
         asn_row(counterparty="", remittance=f"Spaarpot Referentie: {uuid}"),
     ])
