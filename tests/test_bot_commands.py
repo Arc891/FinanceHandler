@@ -555,7 +555,7 @@ def test_the_example_config_passes_the_self_check(monkeypatch, tmp_path):
     missing = [k for k in config_check.REQUIRED_SETTINGS
                if not hasattr(mod, k)]
     assert missing == []
-    assert len(created) == 3
+    assert [directory.name for directory in created] == ["uploads"]
     assert all(directory.is_dir() and directory.is_relative_to(tmp_path)
                for directory in created)
 

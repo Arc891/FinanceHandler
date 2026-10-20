@@ -2,6 +2,7 @@
 
 ## Recent Changes
 
+- 2026-10-20: removed the abandoned ASN bank scraper, its FastAPI/n8n endpoints, the browsercode scripts and the playwright, fastapi and uvicorn requirements.
 - 2026-10-17: `src/cli.py age [--json]` reports the backlog age (days since the last complete run, rows pending in open runs) for the weekly digest, without Discord or a venv; see `docs/ingest-notes.md`.
 
 ### Multi-Month Upload (2026-09-27; release follow-up 2026-09-28)

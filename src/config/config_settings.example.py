@@ -82,16 +82,6 @@ UPLOAD_DIR = "data/uploads"
 # AUTOMATION CONFIGURATION (Session 1+)
 # ─────────────────────────────────────────────────────────────────────────────
 
-# Bank Scraping Configuration
-BANK_SCRAPER_ENABLED = True
-BANK_SESSION_FILE = "data/bank_session.json"
-BANK_DOWNLOAD_DIR = "data/bank_downloads"
-
-# ASN Bank Configuration
-ASN_LOGIN_URL = "https://www.asnbank.nl/inloggen"
-ASN_TRANSACTIONS_URL = "https://www.asnbank.nl/online/web/onlinebankieren/"
-ASN_QR_TIMEOUT_SECONDS = 300  # 5 minutes for QR scan
-
 # AI Categorization (Session 2 - will be configured later)
 CLAUDE_API_KEY = os.environ.get('CLAUDE_API_KEY', '')
 AI_CONFIDENCE_THRESHOLD = 0.75  # below this an AI result is written flagged; set by the evaluation step
@@ -112,17 +102,6 @@ ACCOUNT_ROLES = {
 # The household's own rules (git-ignored; written by scripts/apply_rule_draft.py).
 LOCAL_RULES_PATH = "src/config/local_rules.tsv"
 
-# Automation Schedule
-AUTO_DOWNLOAD_ENABLED = False  # Enable after n8n is set up
-AUTO_DOWNLOAD_TIME = "08:00"  # Run 1hr before daily reminder
-AUTO_DOWNLOAD_DAYS_BACK = 7   # Download last 7 days of transactions
-
-# API Configuration (for n8n integration)
-API_ENABLED = True
-API_HOST = "0.0.0.0"
-API_PORT = 8000
-API_SECRET_KEY = os.environ.get('API_SECRET_KEY', 'change-me-in-production')
-
 # ─────────────────────────────────────────────────────────────────────────────
 # DIRECTORY CREATION
 # ─────────────────────────────────────────────────────────────────────────────
@@ -133,13 +112,8 @@ API_SECRET_KEY = os.environ.get('API_SECRET_KEY', 'change-me-in-production')
 # project root
 _project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
 _upload_path = os.path.join(_project_root, UPLOAD_DIR)
-_bank_download_path = os.path.join(_project_root, BANK_DOWNLOAD_DIR)
-_bank_session_dir = os.path.dirname(
-    os.path.join(_project_root, BANK_SESSION_FILE))
 
 os.makedirs(_upload_path, exist_ok=True)
-os.makedirs(_bank_download_path, exist_ok=True)
-os.makedirs(_bank_session_dir, exist_ok=True)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # LOGGING CONFIGURATION
@@ -184,12 +158,6 @@ __all__ = [
     "PERIOD_LABEL_SPLIT_DAY",
     "UPLOAD_DIR",
     # Automation configs
-    "BANK_SCRAPER_ENABLED",
-    "BANK_SESSION_FILE",
-    "BANK_DOWNLOAD_DIR",
-    "ASN_LOGIN_URL",
-    "ASN_TRANSACTIONS_URL",
-    "ASN_QR_TIMEOUT_SECONDS",
     "CLAUDE_API_KEY",
     "AI_CONFIDENCE_THRESHOLD",
     "AI_PER_TX_FALLBACK_LIMIT",
@@ -200,11 +168,4 @@ __all__ = [
     "AI_CATEGORIZATION_ENABLED",
     "ACCOUNT_ROLES",
     "LOCAL_RULES_PATH",
-    "AUTO_DOWNLOAD_ENABLED",
-    "AUTO_DOWNLOAD_TIME",
-    "AUTO_DOWNLOAD_DAYS_BACK",
-    "API_ENABLED",
-    "API_HOST",
-    "API_PORT",
-    "API_SECRET_KEY"
 ]

@@ -89,13 +89,10 @@ FinanceAutomation/
 │   │   ├── local_rules.tsv         # The household's own rules (not in git)
 │   │   ├── google_service_account.json # Service account for inspection scripts (not in git)
 │   │   └── spaarpot_uuid_map.py    # Savings account mapping
-│   ├── automation/         # Bank automation & AI
-│   │   ├── bank_scraper.py         # Playwright scraper for ASN Bank
+│   ├── automation/         # AI categorisation
 │   │   ├── ai_categorizer.py       # Batch AI categorisation
 │   │   ├── claude_provider.py      # Claude CLI/API abstraction
 │   │   └── data_anonymizer.py      # PII removal before AI calls
-│   ├── api/                # HTTP API for n8n integration
-│   │   └── automation_endpoints.py # FastAPI endpoints
 │   └── finance_core/       # Core business logic
 │       ├── export.py               # Upload pipeline (process_upload, resume, cancel, sort, status)
 │       ├── run_state.py            # Per-run state files
