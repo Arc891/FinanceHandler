@@ -27,29 +27,6 @@ cd src
 python bot.py
 ```
 
-### Starting the Automation API (New - Session 1+)
-
-```bash
-# Start FastAPI server for n8n integration
-cd src
-python -m api.automation_endpoints
-
-# Runs on http://localhost:8000
-# Requires X-API-Key header for authentication
-```
-
-### Testing Bank Scraper
-
-```bash
-# Direct test (useful for debugging)
-cd src
-python -m automation.bank_scraper
-
-# Via API (more realistic)
-curl -X POST http://localhost:8000/api/check-session \
-  -H "X-API-Key: change-me-in-production"
-```
-
 ### Setup & Installation
 
 ```bash
@@ -140,15 +117,14 @@ There is no second phase: when a run completes, every accepted row is in a sheet
 │   ├── plans/MULTI_MONTH_UPLOAD_PLAN.md   # Design and work log of the multi-month upload
 │   ├── automation/             # Bank automation and AI categorisation docs
 │   └── archive/
-├── scripts/                    # Tools (table above); browsercode/ for bank automation setup
+├── scripts/                    # Tools (table above)
 ├── src/
 │   ├── bot.py                  # Entry point: config self-check, cog loading, daily reminder
 │   ├── bot_commands.py         # Discord slash commands (FinanceBot cog)
 │   ├── config_check.py         # REQUIRED_SETTINGS self-check
 │   ├── constants.py            # Categories, rule tables, conditional rules
 │   ├── config/                 # config_settings.py, local_rules.tsv, service-account key (NOT in git)
-│   ├── api/automation_endpoints.py   # FastAPI for n8n
-│   ├── automation/             # ai_categorizer, claude_provider, data_anonymizer, bank_scraper
+│   ├── automation/             # ai_categorizer, claude_provider, data_anonymizer
 │   └── finance_core/
 │       ├── export.py           # Pipeline: process_upload, resume, cancel, sort, status
 │       ├── run_state.py        # data/runs/<upload_id>.json
@@ -199,8 +175,7 @@ All configuration lives in `src/config/config_settings.py` (copy from `config_se
 - Periods: `PERIOD_BOUNDARY_MARKERS`, `PERIOD_BOUNDARY_MIN_AMOUNT`, `PERIOD_MIN_DAYS`, `PERIOD_MAX_DAYS`, `PERIOD_STEP_DAYS`, `PERIOD_LABEL_SPLIT_DAY`.
 - AI: `AI_CONFIDENCE_THRESHOLD` (0.75; flag or not, never write or not), `AI_PER_TX_FALLBACK_LIMIT`, `AI_MAX_PARALLEL_CHUNKS`, `AI_RUN_MAX_MINUTES`, `AI_BUDGET_TRIP_ACTION` (`write_flagged`: the rest is written flagged; `stop`: later months wait for `/resume`), `SUMMARY_FLAGGED_LINES` (beyond it the flagged list is attached as a `.txt`).
 - Rules: `ACCOUNT_ROLES` (`savings`, `partner_personal`, `user_personal` IBANs), `LOCAL_RULES_PATH`.
-- Bank automation and API: `BANK_*`, `ASN_*`, `AUTO_DOWNLOAD_*`, `API_*`.
-- Retired: `GSHEET_TAB`, `GSHEET_EXPENSE_START_ROW`, `GSHEET_INCOME_START_ROW`, `APPROVAL_CHANNEL_ID`, `APPROVAL_WEBHOOK_URL`, `PENDING_APPROVALS_FILE`, `SESSION_DIR`, `CLAUDE_MODEL`, `GOOGLE_AUTH_MODE`, `GSHEET_NAME`, `GOOGLE_CREDENTIALS_PATH`.
+- Retired: `GSHEET_TAB`, `GSHEET_EXPENSE_START_ROW`, `GSHEET_INCOME_START_ROW`, `APPROVAL_CHANNEL_ID`, `APPROVAL_WEBHOOK_URL`, `PENDING_APPROVALS_FILE`, `SESSION_DIR`, `CLAUDE_MODEL`, `GOOGLE_AUTH_MODE`, `GSHEET_NAME`, `GOOGLE_CREDENTIALS_PATH`, `BANK_*`, `ASN_*`, `AUTO_DOWNLOAD_*`, `API_*`.
 
 ### Google access
 
@@ -258,39 +233,6 @@ One spreadsheet per financial month, named `Maandelijks Budget MM/YYYY`, copied 
 - **Transactions**: headers in rows 1-4, data from row 5 (`GSHEET_DATA_START_ROW`). Expenses in columns B-E, income in G-J, each Date, Amount, Description, Category. Amounts are written as absolute values; the block gives the direction. New descriptions have bank-detail notes. Rows are appended, never rewritten, and the block is sorted by date after an upload.
 - **Summary**: `SUMIF` totals per category over the Transactions tab, starting balance in `L8`, closing balance in `E17`. `! Nog in te delen !` is a category in both tables (`B45` expenses, `H35` income), so flagged amounts count in the totals.
 
-## Bank Automation (New - Session 1+)
-
-**Authentication Method**: Browsercode (5-digit PIN)
-
-**Why Browsercode?**
-- QR codes refresh every 4-5 seconds (impossible to automate)
-- Browsercode = one-time setup, then fully automated
-- No second device needed
-- See `AUTOMATION_PLAN.md` for full details
-
-**One-Time Setup** (must be done on automation server):
-1. Run scraper with visible browser: `python -m automation.bank_scraper`
-2. Navigate to ASN Bank login
-3. Create browsercode (5 digits) when prompted
-4. Verify with SMS/email codes
-5. Session saved to `data/bank_session.json`
-6. Server becomes "registered device"
-
-**Browsercode Storage**:
-```bash
-# Store as environment variable (NEVER commit to git)
-export ASN_BROWSERCODE="12345"
-
-# Or in .env file
-echo "ASN_BROWSERCODE=12345" >> .env
-```
-
-**After Setup**:
-- Session persists across restarts (cookie-based)
-- Downloads work automatically
-- Browsercode only needed if session expires
-- Can have max 10 registered devices per account
-
 ## Git Commit Rules
 
 - **Never include self-references** in commit messages (no "Co-Authored-By: Claude", no "Generated with Claude Code", etc.)
@@ -309,8 +251,6 @@ echo "ASN_BROWSERCODE=12345" >> .env
 - Daily reminders use `@tasks.loop(minutes=1)` and check if current time matches configured time
 - Logging uses colored output with unified format across all modules
 - Discord.py library logging is reduced to WARNING level to minimize noise
-- **Bank scraper** uses Playwright (Firefox) with persistent context for session management
-- **API authentication** uses `X-API-Key` header (configured via `API_SECRET_KEY`)
 - **Privacy when inspecting**: scripts that read real sheets or exports print structure and counts only, never descriptions, names, IBANs or amounts. The owner-run `backfill_notes.py` compares private rows in memory but prints counts only; do not run its private matching from an agent session without approval. Do not open `data/`, real CSV exports or `src/config/local_rules.tsv`; work from `tests/fixtures/multi_month.csv` or ask the user to run a script
 
 ## Evaluation
